@@ -1,0 +1,9 @@
+{
+  "name": "mattpocock-skills",
+  "version": "1.2.2",
+  "source": "https://github.com/mattpocock/skills",
+  "commit": "8b36d4fb2635b3c21998dcd8144439c9e5ba7302",
+  "installed_path": ".agents/vendor/mattpocock-skills",
+  "skills_path": ".agents/skills",
+  "update_policy": "manual-review"
+}

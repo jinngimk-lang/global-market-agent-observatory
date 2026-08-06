@@ -1,0 +1,57 @@
+{
+  "generated_at": "2026-08-06T15:00:00+09:00",
+  "policy": {
+    "enabled_by_default": false,
+    "install_root": ".upstreams",
+    "network_at_install": true,
+    "execution": "Each upstream runs outside the core API process unless explicitly approved.",
+    "secrets": "No upstream receives broker or exchange credentials by default."
+  },
+  "projects": [
+    {
+      "name": "lean",
+      "repository": "https://github.com/QuantConnect/Lean.git",
+      "commit": "42b9d7666b360e5e99736886b9db87275ff94c56",
+      "license": "Apache-2.0",
+      "role": "global multi-asset backtesting and execution engine",
+      "integration": "container",
+      "enabled_by_default": false
+    },
+    {
+      "name": "freqtrade",
+      "repository": "https://github.com/freqtrade/freqtrade.git",
+      "commit": "834f7e5365713feb6530ad4df474fe5e800709d9",
+      "license": "GPL-3.0",
+      "role": "crypto strategy research and dry-run engine",
+      "integration": "container",
+      "enabled_by_default": false
+    },
+    {
+      "name": "hummingbot",
+      "repository": "https://github.com/hummingbot/hummingbot.git",
+      "commit": "2bfaccc48dd49e71a5b6d9b3011808e127dd00cd",
+      "license": "Apache-2.0",
+      "role": "crypto market-making and venue connectors",
+      "integration": "container",
+      "enabled_by_default": false
+    },
+    {
+      "name": "ccxt",
+      "repository": "https://github.com/ccxt/ccxt.git",
+      "commit": "50dca7b72fedf4234b3379cea976376d16d08404",
+      "license": "MIT",
+      "role": "normalized read-only crypto exchange account adapters",
+      "integration": "library-process-isolated",
+      "enabled_by_default": false
+    },
+    {
+      "name": "nautilus-trader",
+      "repository": "https://github.com/nautechsystems/nautilus_trader.git",
+      "commit": "86cc3d58e6eeee8e8cefff24ea58f291de77348f",
+      "license": "LGPL-3.0",
+      "role": "high-performance event-driven research engine",
+      "integration": "container",
+      "enabled_by_default": false
+    }
+  ]
+}
