@@ -36,7 +36,7 @@ jobs:
           echo "b9966f6c691caf282205eb72f32922ef9a18479aeb3a00a8246a443058f88bb2  /tmp/source.tar.xz.b64" | sha256sum -c -
           base64 --decode /tmp/source.tar.xz.b64 > /tmp/source.tar.xz
           echo "bb667071be46b924cc0919e272f4d5c4fd3ba0fc7ff497a2931e1a5af1195966  /tmp/source.tar.xz" | sha256sum -c -
-          tar -xJf /tmp/source.tar.xz
+          tar --exclude='./.git' --exclude='./.git/*' -xJf /tmp/source.tar.xz
           rm -f .bootstrap
           rm -rf .github/bootstrap
 
