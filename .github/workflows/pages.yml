@@ -39,6 +39,8 @@ jobs:
           ! grep -R -E "/api/orders|backend-actions.js" site
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v4
         with:
