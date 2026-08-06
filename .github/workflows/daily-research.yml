@@ -1,0 +1,52 @@
+name: Daily official-source research
+
+on:
+  schedule:
+    - cron: "0 23 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: daily-official-research
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install '.[dev]'
+      - name: Collect official releases and configured SEC filings
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEC_USER_AGENT: ${{ vars.SEC_USER_AGENT }}
+          SEC_CIKS: ${{ vars.SEC_CIKS }}
+          GITHUB_RELEASE_REPOSITORIES: ${{ vars.GITHUB_RELEASE_REPOSITORIES }}
+        run: python -m app.research.daily
+      - name: Validate generated records
+        run: python -m pytest -q tests/test_research.py tests/test_crisis_research.py
+      - name: Verify pinned engineering skills
+        run: test -f .agents/skills/engineering/research/SKILL.md
+      - name: Open or update research PR
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: automation/daily-official-research
+          delete-branch: true
+          title: "research: refresh official market intelligence"
+          commit-message: "research: refresh official market intelligence"
+          body: |
+            Automated update from official project releases and configured regulator sources.
+            No trading permissions, risk limits, or credentials were modified.
+          labels: automated-research
+          draft: true
+          add-paths: |
+            data/daily/*.json
