@@ -11,6 +11,7 @@ const state = {
   markers: [],
   disconnectMarket: null,
   startupReady: false,
+  refreshPromise: null,
 };
 
 const money = (value) => Number(value || 0).toLocaleString('en-US', {maximumFractionDigits: 2});
@@ -287,22 +288,33 @@ function setRefreshStatus(message, failed = false) {
 }
 
 async function runRefresh() {
+  if (state.refreshPromise) return state.refreshPromise;
+
   const button = document.getElementById('refresh-button');
-  button.disabled = true;
-  setRefreshStatus('刷新中…');
-  try {
-    const failures = await refreshAll();
-    if (failures.length) {
-      setRefreshStatus(`部分刷新失败（${failures.length} 项），可重试。`, true);
+  const refreshPromise = (async () => {
+    button.disabled = true;
+    setRefreshStatus('刷新中…');
+    try {
+      const failures = await refreshAll();
+      if (failures.length) {
+        setRefreshStatus(`部分刷新失败（${failures.length} 项），可重试。`, true);
+        return false;
+      }
+      setRefreshStatus('刷新完成');
+      return true;
+    } catch (_) {
+      setRefreshStatus('刷新失败，可重试。', true);
       return false;
+    } finally {
+      button.disabled = !runtime.capabilities.accountRefresh;
     }
-    setRefreshStatus('刷新完成');
-    return true;
-  } catch (_) {
-    setRefreshStatus('刷新失败，可重试。', true);
-    return false;
+  })();
+
+  state.refreshPromise = refreshPromise;
+  try {
+    return await refreshPromise;
   } finally {
-    button.disabled = !runtime.capabilities.accountRefresh;
+    if (state.refreshPromise === refreshPromise) state.refreshPromise = null;
   }
 }
 
