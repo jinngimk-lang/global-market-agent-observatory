@@ -18,6 +18,7 @@ def test_dashboard_assets_expose_required_observability_panels(tmp_path) -> None
         runtime = client.get("/static/runtime.js")
         market_client = client.get("/static/market-client.js")
         backend_actions = client.get("/static/backend-actions.js")
+        action_state = client.get("/static/action-state.js")
         config = client.get("/static/config.js")
         stylesheet = client.get("/static/styles.css")
 
@@ -26,6 +27,7 @@ def test_dashboard_assets_expose_required_observability_panels(tmp_path) -> None
     assert runtime.status_code == 200
     assert market_client.status_code == 200
     assert backend_actions.status_code == 200
+    assert action_state.status_code == 200
     assert config.status_code == 200
     assert stylesheet.status_code == 200
     assert 'id="chart"' in index.text
@@ -42,6 +44,8 @@ def test_dashboard_assets_expose_required_observability_panels(tmp_path) -> None
     assert 'src="/static/runtime.js"' in index.text
     assert 'src="/static/market-client.js"' in index.text
     assert 'src="/static/backend-actions.js"' in index.text
+    assert 'src="/static/action-state.js"' in index.text
+    assert index.text.index('/static/action-state.js') < index.text.index('/static/app.js')
     assert "global.ObservatoryRuntime" in runtime.text
     assert "function resolve" in runtime.text
     assert "mode: 'backend'" in config.text
@@ -52,7 +56,10 @@ def test_dashboard_assets_expose_required_observability_panels(tmp_path) -> None
     assert "Authorization" not in market_client.text
     assert "/api/orders" in backend_actions.text
     assert "/api/research/refresh" in backend_actions.text
+    assert "ObservatoryActionState" in action_state.text
     assert "ObservatoryMarketClient.create(runtime)" in javascript.text
+    assert "ObservatoryActionState.create" in javascript.text
+    assert "refreshAction.run(refreshAll)" in javascript.text
     assert "gradeCell.innerHTML" not in javascript.text
     assert "runtime.capabilities.paperOrders" in javascript.text
     assert "LightweightCharts.createChart" in javascript.text
