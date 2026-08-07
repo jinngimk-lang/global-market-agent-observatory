@@ -37,7 +37,7 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
-      - run: node --test tests/e2e/action-smoke.mjs
+      - run: node --test tests/e2e/*.mjs
 
   container:
     runs-on: ubuntu-latest
