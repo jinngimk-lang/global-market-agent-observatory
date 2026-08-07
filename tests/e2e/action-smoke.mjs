@@ -72,10 +72,23 @@ const runtime = {
 };
 
 let historyCalls = 0;
+let connectCalls = 0;
+let disconnectCalls = 0;
+let researchCalls = 0;
+let releaseResearch = null;
 const fakeBackendActions = {
   async loadOrders() { return []; },
   async submitOrder() { throw new Error('simulated transport failure'); },
-  async refreshResearch() { return {stored: 0}; },
+  async refreshResearch() {
+    researchCalls += 1;
+    if (releaseResearch) {
+      await new Promise((resolve) => {
+        const release = releaseResearch;
+        releaseResearch = () => { release(); resolve(); };
+      });
+    }
+    return {stored: 0};
+  },
 };
 
 globalThis.window = {
@@ -84,7 +97,10 @@ globalThis.window = {
   ObservatoryMarketClient: {
     create: () => ({
       async loadHistory() { historyCalls += 1; return []; },
-      connect() { return () => {}; },
+      connect() {
+        connectCalls += 1;
+        return () => { disconnectCalls += 1; };
+      },
     }),
   },
   ObservatoryBackendActions: {create: () => fakeBackendActions},
@@ -138,7 +154,16 @@ globalThis.fetch = async (url) => {
   return {ok: true, status: 200, async json() { return data; }};
 };
 
-globalThis.setInterval = () => 0;
+let nextIntervalId = 101;
+const createdIntervals = [];
+const clearedIntervals = [];
+globalThis.setInterval = () => {
+  const id = nextIntervalId;
+  nextIntervalId += 1;
+  createdIntervals.push(id);
+  return id;
+};
+globalThis.clearInterval = (id) => { clearedIntervals.push(id); };
 
 const source = fs.readFileSync(new URL('../../app/web/app.js', import.meta.url), 'utf8');
 vm.runInThisContext(source, {filename: 'app/web/app.js'});
@@ -149,6 +174,8 @@ for (const handler of windowListeners.get('DOMContentLoaded') || []) {
 
 assert.equal(healthCalls, 1, 'startup should attempt health exactly once before recovery');
 assert.equal(historyCalls, 0, 'history should not run after a failed health load');
+assert.equal(connectCalls, 1, 'market connection must still start after startup data failure');
+assert.deepEqual(createdIntervals, [101], 'backend boot must create one background refresh interval');
 assert.match(element('refresh-status').textContent, /启动.*失败|重试/);
 assert.equal(element('retry-button').hidden, false, 'startup failure must expose recovery');
 
@@ -175,6 +202,21 @@ releasePortfolio();
 await Promise.all([firstRefresh, secondRefresh]);
 assert.match(element('refresh-status').textContent, /完成/);
 
+releaseResearch = () => {};
+const firstResearch = element('research-button').dispatch('click');
+await Promise.resolve();
+const secondResearch = element('research-retry-button').dispatch('click');
+await Promise.resolve();
+assert.equal(
+  researchCalls,
+  1,
+  'overlapping research primary/retry triggers must coalesce into one in-flight collection request',
+);
+releaseResearch();
+await Promise.all([firstResearch, secondResearch]);
+assert.match(element('research-status').textContent, /采集完成/);
+assert.equal(element('research-retry-button').hidden, true, 'successful research collection must clear retry state');
+
 let rejected = false;
 try {
   await element('order-form').dispatch('submit');
@@ -186,3 +228,15 @@ assert.equal(rejected, false, 'paper-order transport failure must be handled by 
 assert.match(element('order-message').textContent, /失败|不可用|重试/);
 assert.equal(element('order-message').className, 'message negative');
 assert.equal(element('side').disabled, false, 'paper form must remain recoverable after a failed request');
+
+for (const handler of windowListeners.get('pagehide') || []) {
+  await handler({persisted: true});
+}
+assert.equal(disconnectCalls, 1, 'pagehide must disconnect the market stream so navigation leaves no live socket behind');
+assert.deepEqual(clearedIntervals, [101], 'pagehide must clear the background refresh interval');
+
+for (const handler of windowListeners.get('pageshow') || []) {
+  await handler({persisted: true});
+}
+assert.equal(connectCalls, 2, 'bfcache pageshow must reconnect the market stream so browser back is not a dead end');
+assert.deepEqual(createdIntervals, [101, 102], 'bfcache pageshow must restore the background refresh interval');

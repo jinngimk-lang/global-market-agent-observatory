@@ -10,14 +10,18 @@ const state = {
   interval: runtime.market.interval,
   markers: [],
   disconnectMarket: null,
+  refreshInterval: null,
   startupReady: false,
   refreshPromise: null,
+  researchPromise: null,
+  lifecycleGeneration: 0,
 };
 
 const money = (value) => Number(value || 0).toLocaleString('en-US', {maximumFractionDigits: 2});
 const number = (value, digits = 6) => Number(value || 0).toLocaleString('en-US', {maximumFractionDigits: digits});
 const text = (value) => value ?? '—';
 const apiUrl = (path) => `${runtime.apiBase}${path}`;
+const isCurrentGeneration = (generation) => generation === state.lifecycleGeneration;
 
 function initChart() {
   const container = document.getElementById('chart');
@@ -59,8 +63,9 @@ function updateConnection(status) {
   badge.className = status.state === 'streaming' ? 'badge safe' : 'badge danger';
 }
 
-async function loadHistory() {
+async function loadHistory(generation = state.lifecycleGeneration) {
   const candles = await marketClient.loadHistory();
+  if (!isCurrentGeneration(generation)) return;
   if (candles.length) {
     state.series.setData(candles.map(candlePoint));
     const last = candles[candles.length - 1];
@@ -70,15 +75,57 @@ async function loadHistory() {
 }
 
 function connectMarket() {
-  state.disconnectMarket = marketClient.connect(updateMarketDisplay, updateConnection);
+  if (state.disconnectMarket) return;
+  const generation = state.lifecycleGeneration;
+  state.disconnectMarket = marketClient.connect(
+    (candle) => {
+      if (isCurrentGeneration(generation)) updateMarketDisplay(candle);
+    },
+    (status) => {
+      if (isCurrentGeneration(generation)) updateConnection(status);
+    },
+  );
 }
 
-async function loadHealth() {
+function disconnectMarket() {
+  if (!state.disconnectMarket) return;
+  state.disconnectMarket();
+  state.disconnectMarket = null;
+}
+
+function startBackgroundRefresh() {
+  if (runtime.mode !== 'backend' || state.refreshInterval !== null) return;
+  state.refreshInterval = setInterval(runRefresh, 5000);
+}
+
+function stopBackgroundRefresh() {
+  if (state.refreshInterval === null) return;
+  clearInterval(state.refreshInterval);
+  state.refreshInterval = null;
+}
+
+function suspendPage() {
+  state.lifecycleGeneration += 1;
+  state.refreshPromise = null;
+  state.researchPromise = null;
+  stopBackgroundRefresh();
+  disconnectMarket();
+}
+
+function restorePage(event) {
+  if (!event.persisted) return;
+  connectMarket();
+  startBackgroundRefresh();
+  retryRefresh();
+}
+
+async function loadHealth(generation = state.lifecycleGeneration) {
   const modeBadge = document.getElementById('mode-badge');
   const capabilityBadge = document.getElementById('capability-badge');
   document.getElementById('symbol-title').textContent = `${state.symbol} · ${state.interval}`;
 
   if (runtime.observeOnly) {
+    if (!isCurrentGeneration(generation)) return;
     modeBadge.textContent = 'OBSERVE ONLY';
     modeBadge.className = 'badge safe';
     capabilityBadge.textContent = 'PUBLIC DATA';
@@ -87,6 +134,7 @@ async function loadHealth() {
   }
 
   const health = await fetch(apiUrl('/api/health')).then((response) => response.json());
+  if (!isCurrentGeneration(generation)) return;
   modeBadge.textContent = health.trading_mode.toUpperCase();
   capabilityBadge.textContent = 'PRIVATE BACKEND';
   state.symbol = health.market_symbol;
@@ -98,10 +146,11 @@ function demoData(key, fallback) {
   return source[key] ?? fallback;
 }
 
-async function loadPortfolio() {
+async function loadPortfolio(generation = state.lifecycleGeneration) {
   const portfolio = runtime.mode === 'backend'
     ? await fetch(apiUrl('/api/portfolio')).then((response) => response.json())
     : demoData('portfolio', {equity: 0, cash: 0, gross_exposure: 0, realized_pnl_today: 0, positions: []});
+  if (!isCurrentGeneration(generation)) return;
   document.getElementById('equity').textContent = money(portfolio.equity);
   document.getElementById('cash').textContent = money(portfolio.cash);
   document.getElementById('gross-exposure').textContent = money(portfolio.gross_exposure);
@@ -126,10 +175,11 @@ async function loadPortfolio() {
   }
 }
 
-async function loadOrders() {
+async function loadOrders(generation = state.lifecycleGeneration) {
   const orders = runtime.mode === 'backend'
     ? await backendActions.loadOrders(50)
     : demoData('orders', []);
+  if (!isCurrentGeneration(generation)) return;
   const body = document.getElementById('orders-body');
   body.replaceChildren();
   state.markers = [];
@@ -160,10 +210,11 @@ async function loadOrders() {
   state.series.setMarkers(state.markers);
 }
 
-async function loadExternalAccounts() {
+async function loadExternalAccounts(generation = state.lifecycleGeneration) {
   const payload = runtime.mode === 'backend'
     ? await fetch(apiUrl('/api/accounts')).then((response) => response.json())
     : demoData('accounts', {accounts: []});
+  if (!isCurrentGeneration(generation)) return;
   const body = document.getElementById('external-accounts-body');
   body.replaceChildren();
   if (!payload.accounts.length) {
@@ -191,10 +242,11 @@ async function loadExternalAccounts() {
   }
 }
 
-async function loadCrisisWinners() {
+async function loadCrisisWinners(generation = state.lifecycleGeneration) {
   const winners = runtime.mode === 'backend'
     ? await fetch(apiUrl('/api/research/crisis-winners?limit=100')).then((response) => response.json())
     : demoData('crisisWinners', []);
+  if (!isCurrentGeneration(generation)) return;
   const body = document.getElementById('crisis-winners-body');
   body.replaceChildren();
   if (!winners.length) {
@@ -220,10 +272,11 @@ async function loadCrisisWinners() {
   }
 }
 
-async function loadPartnerships() {
+async function loadPartnerships(generation = state.lifecycleGeneration) {
   const assessments = runtime.mode === 'backend'
     ? await fetch(apiUrl('/api/research/partnerships?limit=100')).then((response) => response.json())
     : demoData('partnerships', []);
+  if (!isCurrentGeneration(generation)) return;
   const body = document.getElementById('partnerships-body');
   body.replaceChildren();
   if (!assessments.length) {
@@ -247,10 +300,11 @@ async function loadPartnerships() {
   }
 }
 
-async function loadEvidence() {
+async function loadEvidence(generation = state.lifecycleGeneration) {
   const evidence = runtime.mode === 'backend'
     ? await fetch(apiUrl('/api/evidence?limit=100')).then((response) => response.json())
     : demoData('evidence', []);
+  if (!isCurrentGeneration(generation)) return;
   const body = document.getElementById('evidence-body');
   body.replaceChildren();
   if (!evidence.length) {
@@ -273,8 +327,11 @@ async function loadEvidence() {
   }
 }
 
-async function refreshAll() {
-  const tasks = [loadPortfolio(), loadOrders(), loadEvidence(), loadExternalAccounts(), loadCrisisWinners(), loadPartnerships()];
+async function refreshAll(generation = state.lifecycleGeneration) {
+  const tasks = [
+    loadPortfolio(generation), loadOrders(generation), loadEvidence(generation),
+    loadExternalAccounts(generation), loadCrisisWinners(generation), loadPartnerships(generation),
+  ];
   const results = await Promise.allSettled(tasks);
   return results.filter((result) => result.status === 'rejected');
 }
@@ -290,12 +347,14 @@ function setRefreshStatus(message, failed = false) {
 async function runRefresh() {
   if (state.refreshPromise) return state.refreshPromise;
 
+  const generation = state.lifecycleGeneration;
   const button = document.getElementById('refresh-button');
   const refreshPromise = (async () => {
     button.disabled = true;
     setRefreshStatus('刷新中…');
     try {
-      const failures = await refreshAll();
+      const failures = await refreshAll(generation);
+      if (!isCurrentGeneration(generation)) return false;
       if (failures.length) {
         setRefreshStatus(`部分刷新失败（${failures.length} 项），可重试。`, true);
         return false;
@@ -303,10 +362,10 @@ async function runRefresh() {
       setRefreshStatus('刷新完成');
       return true;
     } catch (_) {
-      setRefreshStatus('刷新失败，可重试。', true);
+      if (isCurrentGeneration(generation)) setRefreshStatus('刷新失败，可重试。', true);
       return false;
     } finally {
-      button.disabled = !runtime.capabilities.accountRefresh;
+      if (isCurrentGeneration(generation)) button.disabled = !runtime.capabilities.accountRefresh;
     }
   })();
 
@@ -319,13 +378,16 @@ async function runRefresh() {
 }
 
 async function runStartupLoad() {
+  const generation = state.lifecycleGeneration;
   try {
-    await loadHealth();
-    await loadHistory();
+    await loadHealth(generation);
+    if (!isCurrentGeneration(generation)) return false;
+    await loadHistory(generation);
+    if (!isCurrentGeneration(generation)) return false;
     state.startupReady = true;
     return await runRefresh();
   } catch (_) {
-    setRefreshStatus('启动数据加载失败，可重试。', true);
+    if (isCurrentGeneration(generation)) setRefreshStatus('启动数据加载失败，可重试。', true);
     return false;
   }
 }
@@ -336,6 +398,7 @@ async function retryRefresh() {
 
 async function submitOrder(event) {
   event.preventDefault();
+  const generation = state.lifecycleGeneration;
   const message = document.getElementById('order-message');
   if (!runtime.capabilities.paperOrders) {
     message.textContent = '静态观察模式已禁用所有订单操作。';
@@ -351,6 +414,7 @@ async function submitOrder(event) {
   try {
     if (!backendActions) throw new Error('backend actions are unavailable');
     const result = await backendActions.submitOrder(payload);
+    if (!isCurrentGeneration(generation)) return;
     const data = result.data;
     if (!result.ok) {
       message.textContent = `拒绝：${data.detail?.code || 'request_failed'} · ${data.detail?.message || ''}`;
@@ -362,6 +426,7 @@ async function submitOrder(event) {
     document.getElementById('client-order-id').value = crypto.randomUUID();
     await runRefresh();
   } catch (_) {
+    if (!isCurrentGeneration(generation)) return;
     message.textContent = '提交失败：请求未完成，可重试。';
     message.className = 'message negative';
   }
@@ -376,24 +441,42 @@ function setResearchStatus(message, failed = false) {
 }
 
 async function refreshResearch() {
+  if (state.researchPromise) return state.researchPromise;
+  if (!runtime.capabilities.researchRefresh) return false;
+
+  const generation = state.lifecycleGeneration;
   const button = document.getElementById('research-button');
   const retryButton = document.getElementById('research-retry-button');
-  if (!runtime.capabilities.researchRefresh) return;
-  button.disabled = true;
-  retryButton.disabled = true;
-  button.textContent = '采集中…';
-  setResearchStatus('正在拉取官方更新…');
+  const researchPromise = (async () => {
+    button.disabled = true;
+    retryButton.disabled = true;
+    button.textContent = '采集中…';
+    setResearchStatus('正在拉取官方更新…');
+    try {
+      if (!backendActions) throw new Error('backend actions are unavailable');
+      const result = await backendActions.refreshResearch();
+      if (!isCurrentGeneration(generation)) return false;
+      await loadEvidence(generation);
+      if (!isCurrentGeneration(generation)) return false;
+      setResearchStatus(`采集完成 · 新增 ${result.stored || 0} 条`);
+      return true;
+    } catch (_) {
+      if (isCurrentGeneration(generation)) setResearchStatus('采集失败，可重试。', true);
+      return false;
+    } finally {
+      if (isCurrentGeneration(generation)) {
+        button.disabled = !runtime.capabilities.researchRefresh;
+        button.textContent = '拉取官方更新';
+        retryButton.disabled = false;
+      }
+    }
+  })();
+
+  state.researchPromise = researchPromise;
   try {
-    if (!backendActions) throw new Error('backend actions are unavailable');
-    const result = await backendActions.refreshResearch();
-    await loadEvidence();
-    setResearchStatus(`采集完成 · 新增 ${result.stored || 0} 条`);
-  } catch (_) {
-    setResearchStatus('采集失败，可重试。', true);
+    return await researchPromise;
   } finally {
-    button.disabled = !runtime.capabilities.researchRefresh;
-    button.textContent = '拉取官方更新';
-    retryButton.disabled = false;
+    if (state.researchPromise === researchPromise) state.researchPromise = null;
   }
 }
 
@@ -409,6 +492,9 @@ function applyCapabilities() {
   refreshButton.disabled = !runtime.capabilities.accountRefresh;
 }
 
+window.addEventListener('pagehide', suspendPage);
+window.addEventListener('pageshow', restorePage);
+
 window.addEventListener('DOMContentLoaded', async () => {
   initChart();
   document.getElementById('client-order-id').value = crypto.randomUUID();
@@ -423,5 +509,5 @@ window.addEventListener('DOMContentLoaded', async () => {
   } finally {
     connectMarket();
   }
-  if (runtime.mode === 'backend') setInterval(runRefresh, 5000);
+  startBackgroundRefresh();
 });
