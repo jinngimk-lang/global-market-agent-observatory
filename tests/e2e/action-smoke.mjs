@@ -71,6 +71,7 @@ const runtime = {
   capabilities: {paperOrders: true, researchRefresh: true, accountRefresh: true},
 };
 
+let historyCalls = 0;
 const fakeBackendActions = {
   async loadOrders() { return []; },
   async submitOrder() { throw new Error('simulated transport failure'); },
@@ -82,7 +83,7 @@ globalThis.window = {
   ObservatoryRuntime: {resolve: () => runtime},
   ObservatoryMarketClient: {
     create: () => ({
-      async loadHistory() { return []; },
+      async loadHistory() { historyCalls += 1; return []; },
       connect() { return () => {}; },
     }),
   },
@@ -113,15 +114,19 @@ globalThis.ResizeObserver = class {
   observe() { this.callback(); }
 };
 
+let healthCalls = 0;
 globalThis.fetch = async (url) => {
   const path = String(url);
-  const data = path.includes('/api/health')
-    ? {trading_mode: 'paper', market_symbol: 'BTCUSDT'}
-    : path.includes('/api/portfolio')
-      ? {equity: 0, cash: 0, gross_exposure: 0, realized_pnl_today: 0, positions: []}
-      : path.includes('/api/accounts')
-        ? {accounts: []}
-        : [];
+  if (path.includes('/api/health')) {
+    healthCalls += 1;
+    if (healthCalls === 1) throw new Error('simulated startup health failure');
+    return {ok: true, status: 200, async json() { return {trading_mode: 'paper', market_symbol: 'BTCUSDT'}; }};
+  }
+  const data = path.includes('/api/portfolio')
+    ? {equity: 0, cash: 0, gross_exposure: 0, realized_pnl_today: 0, positions: []}
+    : path.includes('/api/accounts')
+      ? {accounts: []}
+      : [];
   return {ok: true, status: 200, async json() { return data; }};
 };
 
@@ -133,6 +138,19 @@ vm.runInThisContext(source, {filename: 'app/web/app.js'});
 for (const handler of windowListeners.get('DOMContentLoaded') || []) {
   await handler();
 }
+
+assert.equal(healthCalls, 1, 'startup should attempt health exactly once before recovery');
+assert.equal(historyCalls, 0, 'history should not run after a failed health load');
+assert.match(element('refresh-status').textContent, /启动.*失败|重试/);
+assert.equal(element('retry-button').hidden, false, 'startup failure must expose recovery');
+
+await element('retry-button').dispatch('click');
+
+assert.equal(healthCalls, 2, 'retry must replay the failed startup health load');
+assert.equal(historyCalls, 1, 'retry must continue the startup chain through history');
+assert.equal(element('mode-badge').textContent, 'PAPER');
+assert.match(element('refresh-status').textContent, /完成/);
+assert.equal(element('retry-button').hidden, true, 'successful startup recovery must clear retry state');
 
 let rejected = false;
 try {
