@@ -333,19 +333,33 @@ async function submitOrder(event) {
   await runRefresh();
 }
 
+function setResearchStatus(message, failed = false) {
+  const status = document.getElementById('research-status');
+  const retryButton = document.getElementById('research-retry-button');
+  status.textContent = message;
+  status.className = failed ? 'message negative' : 'message positive';
+  retryButton.hidden = !failed;
+}
+
 async function refreshResearch() {
   const button = document.getElementById('research-button');
+  const retryButton = document.getElementById('research-retry-button');
   if (!runtime.capabilities.researchRefresh) return;
-  button.disabled = true; button.textContent = '采集中…';
+  button.disabled = true;
+  retryButton.disabled = true;
+  button.textContent = '采集中…';
+  setResearchStatus('正在拉取官方更新…');
   try {
     if (!backendActions) throw new Error('backend actions are unavailable');
     const result = await backendActions.refreshResearch();
-    button.textContent = `新增 ${result.stored || 0} 条`;
     await loadEvidence();
+    setResearchStatus(`采集完成 · 新增 ${result.stored || 0} 条`);
   } catch (_) {
-    button.textContent = '采集失败';
+    setResearchStatus('采集失败，可重试。', true);
   } finally {
-    setTimeout(() => { button.disabled = false; button.textContent = '拉取官方更新'; }, 2500);
+    button.disabled = !runtime.capabilities.researchRefresh;
+    button.textContent = '拉取官方更新';
+    retryButton.disabled = false;
   }
 }
 
@@ -368,6 +382,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('refresh-button').addEventListener('click', runRefresh);
   document.getElementById('retry-button').addEventListener('click', runRefresh);
   document.getElementById('research-button').addEventListener('click', refreshResearch);
+  document.getElementById('research-retry-button').addEventListener('click', refreshResearch);
   applyCapabilities();
   try {
     await loadHealth();
