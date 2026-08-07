@@ -319,18 +319,23 @@ async function submitOrder(event) {
     side: document.getElementById('side').value,
     quantity: document.getElementById('quantity').value,
   };
-  if (!backendActions) throw new Error('backend actions are unavailable');
-  const result = await backendActions.submitOrder(payload);
-  const data = result.data;
-  if (!result.ok) {
-    message.textContent = `拒绝：${data.detail?.code || 'request_failed'} · ${data.detail?.message || ''}`;
+  try {
+    if (!backendActions) throw new Error('backend actions are unavailable');
+    const result = await backendActions.submitOrder(payload);
+    const data = result.data;
+    if (!result.ok) {
+      message.textContent = `拒绝：${data.detail?.code || 'request_failed'} · ${data.detail?.message || ''}`;
+      message.className = 'message negative';
+      return;
+    }
+    message.textContent = `成交：${data.intent.side.toUpperCase()} ${data.intent.quantity} @ ${data.filled_price}`;
+    message.className = 'message positive';
+    document.getElementById('client-order-id').value = crypto.randomUUID();
+    await runRefresh();
+  } catch (_) {
+    message.textContent = '提交失败：请求未完成，可重试。';
     message.className = 'message negative';
-    return;
   }
-  message.textContent = `成交：${data.intent.side.toUpperCase()} ${data.intent.quantity} @ ${data.filled_price}`;
-  message.className = 'message positive';
-  document.getElementById('client-order-id').value = crypto.randomUUID();
-  await runRefresh();
 }
 
 function setResearchStatus(message, failed = false) {
