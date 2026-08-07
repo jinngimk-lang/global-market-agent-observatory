@@ -38,15 +38,15 @@ class AlpacaObserver:
     async def snapshot(self) -> ExternalAccountSnapshot:
         if self._client is not None:
             return await self._snapshot_with_client(self._client)
-        async with httpx.AsyncClient(base_url=self._base_url, timeout=20) as client:
+        async with httpx.AsyncClient(timeout=20) as client:
             return await self._snapshot_with_client(client)
 
     async def _snapshot_with_client(self, client: httpx.AsyncClient) -> ExternalAccountSnapshot:
         account_response, positions_response, orders_response = await asyncio.gather(
-            client.get("/v2/account", headers=self._headers),
-            client.get("/v2/positions", headers=self._headers),
+            client.get(self._url("/v2/account"), headers=self._headers),
+            client.get(self._url("/v2/positions"), headers=self._headers),
             client.get(
-                "/v2/orders",
+                self._url("/v2/orders"),
                 headers=self._headers,
                 params={"status": "all", "limit": 100, "direction": "desc"},
             ),
@@ -70,6 +70,9 @@ class AlpacaObserver:
             positions=positions,
             orders=orders,
         )
+
+    def _url(self, path: str) -> str:
+        return f"{self._base_url}{path}"
 
     @classmethod
     def _map_position(cls, item: dict[str, Any]) -> ObservedPosition:
