@@ -10,6 +10,8 @@ const state = {
   interval: runtime.market.interval,
   markers: [],
   disconnectMarket: null,
+  startupReady: false,
+  refreshPromise: null,
 };
 
 const money = (value) => Number(value || 0).toLocaleString('en-US', {maximumFractionDigits: 2});
@@ -272,7 +274,64 @@ async function loadEvidence() {
 }
 
 async function refreshAll() {
-  await Promise.all([loadPortfolio(), loadOrders(), loadEvidence(), loadExternalAccounts(), loadCrisisWinners(), loadPartnerships()]);
+  const tasks = [loadPortfolio(), loadOrders(), loadEvidence(), loadExternalAccounts(), loadCrisisWinners(), loadPartnerships()];
+  const results = await Promise.allSettled(tasks);
+  return results.filter((result) => result.status === 'rejected');
+}
+
+function setRefreshStatus(message, failed = false) {
+  const status = document.getElementById('refresh-status');
+  const retryButton = document.getElementById('retry-button');
+  status.textContent = message;
+  status.className = failed ? 'message negative' : 'message positive';
+  retryButton.hidden = !failed;
+}
+
+async function runRefresh() {
+  if (state.refreshPromise) return state.refreshPromise;
+
+  const button = document.getElementById('refresh-button');
+  const refreshPromise = (async () => {
+    button.disabled = true;
+    setRefreshStatus('刷新中…');
+    try {
+      const failures = await refreshAll();
+      if (failures.length) {
+        setRefreshStatus(`部分刷新失败（${failures.length} 项），可重试。`, true);
+        return false;
+      }
+      setRefreshStatus('刷新完成');
+      return true;
+    } catch (_) {
+      setRefreshStatus('刷新失败，可重试。', true);
+      return false;
+    } finally {
+      button.disabled = !runtime.capabilities.accountRefresh;
+    }
+  })();
+
+  state.refreshPromise = refreshPromise;
+  try {
+    return await refreshPromise;
+  } finally {
+    if (state.refreshPromise === refreshPromise) state.refreshPromise = null;
+  }
+}
+
+async function runStartupLoad() {
+  try {
+    await loadHealth();
+    await loadHistory();
+    state.startupReady = true;
+    return await runRefresh();
+  } catch (_) {
+    setRefreshStatus('启动数据加载失败，可重试。', true);
+    return false;
+  }
+}
+
+async function retryRefresh() {
+  return state.startupReady ? runRefresh() : runStartupLoad();
 }
 
 async function submitOrder(event) {
@@ -289,33 +348,52 @@ async function submitOrder(event) {
     side: document.getElementById('side').value,
     quantity: document.getElementById('quantity').value,
   };
-  if (!backendActions) throw new Error('backend actions are unavailable');
-  const result = await backendActions.submitOrder(payload);
-  const data = result.data;
-  if (!result.ok) {
-    message.textContent = `拒绝：${data.detail?.code || 'request_failed'} · ${data.detail?.message || ''}`;
+  try {
+    if (!backendActions) throw new Error('backend actions are unavailable');
+    const result = await backendActions.submitOrder(payload);
+    const data = result.data;
+    if (!result.ok) {
+      message.textContent = `拒绝：${data.detail?.code || 'request_failed'} · ${data.detail?.message || ''}`;
+      message.className = 'message negative';
+      return;
+    }
+    message.textContent = `成交：${data.intent.side.toUpperCase()} ${data.intent.quantity} @ ${data.filled_price}`;
+    message.className = 'message positive';
+    document.getElementById('client-order-id').value = crypto.randomUUID();
+    await runRefresh();
+  } catch (_) {
+    message.textContent = '提交失败：请求未完成，可重试。';
     message.className = 'message negative';
-    return;
   }
-  message.textContent = `成交：${data.intent.side.toUpperCase()} ${data.intent.quantity} @ ${data.filled_price}`;
-  message.className = 'message positive';
-  document.getElementById('client-order-id').value = crypto.randomUUID();
-  await refreshAll();
+}
+
+function setResearchStatus(message, failed = false) {
+  const status = document.getElementById('research-status');
+  const retryButton = document.getElementById('research-retry-button');
+  status.textContent = message;
+  status.className = failed ? 'message negative' : 'message positive';
+  retryButton.hidden = !failed;
 }
 
 async function refreshResearch() {
   const button = document.getElementById('research-button');
+  const retryButton = document.getElementById('research-retry-button');
   if (!runtime.capabilities.researchRefresh) return;
-  button.disabled = true; button.textContent = '采集中…';
+  button.disabled = true;
+  retryButton.disabled = true;
+  button.textContent = '采集中…';
+  setResearchStatus('正在拉取官方更新…');
   try {
     if (!backendActions) throw new Error('backend actions are unavailable');
     const result = await backendActions.refreshResearch();
-    button.textContent = `新增 ${result.stored || 0} 条`;
     await loadEvidence();
+    setResearchStatus(`采集完成 · 新增 ${result.stored || 0} 条`);
   } catch (_) {
-    button.textContent = '采集失败';
+    setResearchStatus('采集失败，可重试。', true);
   } finally {
-    setTimeout(() => { button.disabled = false; button.textContent = '拉取官方更新'; }, 2500);
+    button.disabled = !runtime.capabilities.researchRefresh;
+    button.textContent = '拉取官方更新';
+    retryButton.disabled = false;
   }
 }
 
@@ -335,12 +413,15 @@ window.addEventListener('DOMContentLoaded', async () => {
   initChart();
   document.getElementById('client-order-id').value = crypto.randomUUID();
   document.getElementById('order-form').addEventListener('submit', submitOrder);
-  document.getElementById('refresh-button').addEventListener('click', refreshAll);
+  document.getElementById('refresh-button').addEventListener('click', runRefresh);
+  document.getElementById('retry-button').addEventListener('click', retryRefresh);
   document.getElementById('research-button').addEventListener('click', refreshResearch);
+  document.getElementById('research-retry-button').addEventListener('click', refreshResearch);
   applyCapabilities();
-  await loadHealth();
-  await loadHistory();
-  await refreshAll();
-  connectMarket();
-  if (runtime.mode === 'backend') setInterval(refreshAll, 5000);
+  try {
+    await runStartupLoad();
+  } finally {
+    connectMarket();
+  }
+  if (runtime.mode === 'backend') setInterval(runRefresh, 5000);
 });

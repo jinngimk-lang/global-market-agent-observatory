@@ -215,6 +215,14 @@
         });
         socket.addEventListener('error', () => {
           onStatus({state: 'degraded', label: 'STREAM ERROR'});
+          scheduleReconnect(openSocket);
+          if (socket && socket.readyState < 2) {
+            try {
+              socket.close();
+            } catch (_) {
+              // Reconnect is already scheduled; a close failure cannot strand recovery.
+            }
+          }
         });
         socket.addEventListener('close', () => scheduleReconnect(openSocket));
       }

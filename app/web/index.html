@@ -51,6 +51,8 @@
         <article><span>总敞口</span><strong id="gross-exposure">—</strong></article>
         <article><span>今日已实现</span><strong id="realized-pnl">—</strong></article>
       </div>
+      <p id="refresh-status" class="message" role="status" aria-live="polite">等待刷新</p>
+      <button id="retry-button" class="ghost-button" type="button" hidden>重试失败项</button>
       <div class="risk-card">
         <div>
           <span class="signal-dot"></span>
@@ -145,6 +147,8 @@
         <div><p class="label">全球情报</p><h2>可信证据库</h2></div>
         <button id="research-button" class="ghost-button" type="button">拉取官方更新</button>
       </div>
+      <p id="research-status" class="message" role="status" aria-live="polite">等待研究刷新</p>
+      <button id="research-retry-button" class="ghost-button" type="button" hidden>重试研究刷新</button>
       <p class="evidence-note">A=账户/链上/审计；B=监管披露；C=公司与官方项目；D=未验证线索。D级信息不得驱动自动交易。</p>
       <div class="table-wrap">
         <table>
