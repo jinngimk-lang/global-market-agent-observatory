@@ -10,6 +10,7 @@ const state = {
   interval: runtime.market.interval,
   markers: [],
   disconnectMarket: null,
+  refreshInterval: null,
   startupReady: false,
   refreshPromise: null,
 };
@@ -70,7 +71,36 @@ async function loadHistory() {
 }
 
 function connectMarket() {
+  if (state.disconnectMarket) return;
   state.disconnectMarket = marketClient.connect(updateMarketDisplay, updateConnection);
+}
+
+function disconnectMarket() {
+  if (!state.disconnectMarket) return;
+  state.disconnectMarket();
+  state.disconnectMarket = null;
+}
+
+function startBackgroundRefresh() {
+  if (runtime.mode !== 'backend' || state.refreshInterval !== null) return;
+  state.refreshInterval = setInterval(runRefresh, 5000);
+}
+
+function stopBackgroundRefresh() {
+  if (state.refreshInterval === null) return;
+  clearInterval(state.refreshInterval);
+  state.refreshInterval = null;
+}
+
+function suspendPage() {
+  stopBackgroundRefresh();
+  disconnectMarket();
+}
+
+function restorePage(event) {
+  if (!event.persisted) return;
+  connectMarket();
+  startBackgroundRefresh();
 }
 
 async function loadHealth() {
@@ -409,6 +439,9 @@ function applyCapabilities() {
   refreshButton.disabled = !runtime.capabilities.accountRefresh;
 }
 
+window.addEventListener('pagehide', suspendPage);
+window.addEventListener('pageshow', restorePage);
+
 window.addEventListener('DOMContentLoaded', async () => {
   initChart();
   document.getElementById('client-order-id').value = crypto.randomUUID();
@@ -423,5 +456,5 @@ window.addEventListener('DOMContentLoaded', async () => {
   } finally {
     connectMarket();
   }
-  if (runtime.mode === 'backend') setInterval(runRefresh, 5000);
+  startBackgroundRefresh();
 });
