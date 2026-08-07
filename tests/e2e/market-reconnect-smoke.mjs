@@ -84,10 +84,17 @@ const disconnect = client.connect(
 
 assert.equal(FakeWebSocket.instances.length, 1, 'connect must attempt a stream immediately');
 
-for (let attempt = 0; attempt < 3; attempt += 1) {
+const erroredSocket = FakeWebSocket.instances.at(-1);
+erroredSocket.emit('error');
+assert.equal(statuses.at(-1).state, 'reconnecting', 'stream error must enter a recoverable reconnect state even without a server close event');
+const errorReconnect = timeoutQueue.shift();
+assert.ok(errorReconnect, 'stream error must schedule reconnect even when no close event arrives');
+errorReconnect.callback();
+
+for (let attempt = 0; attempt < 2; attempt += 1) {
   const socket = FakeWebSocket.instances.at(-1);
   socket.closeFromServer();
-  assert.equal(statuses.at(-1).state, attempt === 2 ? 'reconnecting' : 'reconnecting');
+  assert.equal(statuses.at(-1).state, 'reconnecting');
   const scheduled = timeoutQueue.shift();
   assert.ok(scheduled, 'disconnect must schedule a reconnect');
   scheduled.callback();
