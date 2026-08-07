@@ -10,7 +10,7 @@ assert.match(
 );
 assert.match(
   source,
-  /function\s+isCurrentGeneration\s*\(/,
+  /(?:function\s+isCurrentGeneration\s*\(|const\s+isCurrentGeneration\s*=)/,
   'async UI mutations must have a shared current-generation guard',
 );
 assert.match(
