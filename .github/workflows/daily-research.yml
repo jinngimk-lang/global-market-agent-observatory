@@ -36,7 +36,20 @@ jobs:
         run: python -m pytest -q tests/test_research.py tests/test_crisis_research.py
       - name: Verify pinned engineering skills
         run: test -f .agents/skills/engineering/research/SKILL.md
+      - name: Check whether collection produced records
+        id: research_delta
+        run: |
+          count=$(python -c 'import json; from datetime import UTC, datetime; from pathlib import Path; p = Path("data/daily") / f"{datetime.now(UTC).date().isoformat()}.json"; print(len(json.loads(p.read_text(encoding="utf-8"))["records"]))')
+          if [ "$count" -gt 0 ]; then
+            echo "has_records=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_records=false" >> "$GITHUB_OUTPUT"
+            echo "No official-source records collected; skipping PR creation."
+          fi
       - name: Open or update research PR
+        if: steps.research_delta.outputs.has_records == 'true'
+        id: research_pr
+        continue-on-error: true
         uses: peter-evans/create-pull-request@v7
         with:
           branch: automation/daily-official-research
@@ -50,3 +63,8 @@ jobs:
           draft: true
           add-paths: |
             data/daily/*.json
+      - name: Verify recovery branch when PR creation is blocked
+        if: steps.research_delta.outputs.has_records == 'true' && steps.research_pr.outcome == 'failure'
+        run: |
+          echo "PR creation was blocked; verifying the research branch was preserved for manual review."
+          git ls-remote --exit-code origin refs/heads/automation/daily-official-research
