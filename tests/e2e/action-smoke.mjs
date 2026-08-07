@@ -74,10 +74,21 @@ const runtime = {
 let historyCalls = 0;
 let connectCalls = 0;
 let disconnectCalls = 0;
+let researchCalls = 0;
+let releaseResearch = null;
 const fakeBackendActions = {
   async loadOrders() { return []; },
   async submitOrder() { throw new Error('simulated transport failure'); },
-  async refreshResearch() { return {stored: 0}; },
+  async refreshResearch() {
+    researchCalls += 1;
+    if (releaseResearch) {
+      await new Promise((resolve) => {
+        const release = releaseResearch;
+        releaseResearch = () => { release(); resolve(); };
+      });
+    }
+    return {stored: 0};
+  },
 };
 
 globalThis.window = {
@@ -190,6 +201,21 @@ assert.equal(
 releasePortfolio();
 await Promise.all([firstRefresh, secondRefresh]);
 assert.match(element('refresh-status').textContent, /完成/);
+
+releaseResearch = () => {};
+const firstResearch = element('research-button').dispatch('click');
+await Promise.resolve();
+const secondResearch = element('research-retry-button').dispatch('click');
+await Promise.resolve();
+assert.equal(
+  researchCalls,
+  1,
+  'overlapping research primary/retry triggers must coalesce into one in-flight collection request',
+);
+releaseResearch();
+await Promise.all([firstResearch, secondResearch]);
+assert.match(element('research-status').textContent, /采集完成/);
+assert.equal(element('research-retry-button').hidden, true, 'successful research collection must clear retry state');
 
 let rejected = false;
 try {
