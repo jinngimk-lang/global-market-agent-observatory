@@ -4,8 +4,8 @@ This module intentionally provides analytics only. It does not create
 execution signals or trading actions.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 
 @dataclass(frozen=True)
