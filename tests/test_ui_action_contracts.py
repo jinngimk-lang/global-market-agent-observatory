@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 INDEX = Path("app/web/index.html")
 APP = Path("app/web/app.js")
 
