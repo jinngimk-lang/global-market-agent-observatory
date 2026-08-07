@@ -115,6 +115,8 @@ globalThis.ResizeObserver = class {
 };
 
 let healthCalls = 0;
+let portfolioCalls = 0;
+let releasePortfolio = null;
 globalThis.fetch = async (url) => {
   const path = String(url);
   if (path.includes('/api/health')) {
@@ -122,11 +124,17 @@ globalThis.fetch = async (url) => {
     if (healthCalls === 1) throw new Error('simulated startup health failure');
     return {ok: true, status: 200, async json() { return {trading_mode: 'paper', market_symbol: 'BTCUSDT'}; }};
   }
-  const data = path.includes('/api/portfolio')
-    ? {equity: 0, cash: 0, gross_exposure: 0, realized_pnl_today: 0, positions: []}
-    : path.includes('/api/accounts')
-      ? {accounts: []}
-      : [];
+  if (path.includes('/api/portfolio')) {
+    portfolioCalls += 1;
+    if (releasePortfolio) {
+      await new Promise((resolve) => {
+        const release = releasePortfolio;
+        releasePortfolio = () => { release(); resolve(); };
+      });
+    }
+    return {ok: true, status: 200, async json() { return {equity: 0, cash: 0, gross_exposure: 0, realized_pnl_today: 0, positions: []}; }};
+  }
+  const data = path.includes('/api/accounts') ? {accounts: []} : [];
   return {ok: true, status: 200, async json() { return data; }};
 };
 
@@ -151,6 +159,21 @@ assert.equal(historyCalls, 1, 'retry must continue the startup chain through his
 assert.equal(element('mode-badge').textContent, 'PAPER');
 assert.match(element('refresh-status').textContent, /完成/);
 assert.equal(element('retry-button').hidden, true, 'successful startup recovery must clear retry state');
+
+const portfolioCallsBeforeOverlap = portfolioCalls;
+releasePortfolio = () => {};
+const firstRefresh = element('refresh-button').dispatch('click');
+await Promise.resolve();
+const secondRefresh = element('refresh-button').dispatch('click');
+await Promise.resolve();
+assert.equal(
+  portfolioCalls,
+  portfolioCallsBeforeOverlap + 1,
+  'overlapping refresh triggers must coalesce into one in-flight dashboard refresh',
+);
+releasePortfolio();
+await Promise.all([firstRefresh, secondRefresh]);
+assert.match(element('refresh-status').textContent, /完成/);
 
 let rejected = false;
 try {
