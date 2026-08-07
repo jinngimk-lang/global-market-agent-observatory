@@ -37,6 +37,19 @@ def test_refresh_and_startup_failures_have_recovery_paths():
     assert "retry-button" in js
 
 
+def test_research_refresh_has_persistent_result_and_retry_path():
+    html = _read(INDEX)
+    js = _read(APP)
+
+    # Research collection is a critical action: success/failure must stay visible
+    # and a failed attempt must expose a direct retry path instead of timing out.
+    assert 'id="research-status"' in html
+    assert 'id="research-retry-button"' in html
+    assert "setResearchStatus" in js
+    assert "research-retry-button').addEventListener('click', refreshResearch)" in js
+    assert "setTimeout(() => { button.disabled = false" not in js
+
+
 def test_observe_only_boundary_remains_visible_and_non_executable():
     html = _read(INDEX)
     js = _read(APP)
