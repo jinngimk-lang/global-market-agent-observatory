@@ -13,6 +13,7 @@ const state = {
   refreshInterval: null,
   startupReady: false,
   refreshPromise: null,
+  researchPromise: null,
 };
 
 const money = (value) => Number(value || 0).toLocaleString('en-US', {maximumFractionDigits: 2});
@@ -406,24 +407,37 @@ function setResearchStatus(message, failed = false) {
 }
 
 async function refreshResearch() {
+  if (state.researchPromise) return state.researchPromise;
+  if (!runtime.capabilities.researchRefresh) return false;
+
   const button = document.getElementById('research-button');
   const retryButton = document.getElementById('research-retry-button');
-  if (!runtime.capabilities.researchRefresh) return;
-  button.disabled = true;
-  retryButton.disabled = true;
-  button.textContent = '采集中…';
-  setResearchStatus('正在拉取官方更新…');
+  const researchPromise = (async () => {
+    button.disabled = true;
+    retryButton.disabled = true;
+    button.textContent = '采集中…';
+    setResearchStatus('正在拉取官方更新…');
+    try {
+      if (!backendActions) throw new Error('backend actions are unavailable');
+      const result = await backendActions.refreshResearch();
+      await loadEvidence();
+      setResearchStatus(`采集完成 · 新增 ${result.stored || 0} 条`);
+      return true;
+    } catch (_) {
+      setResearchStatus('采集失败，可重试。', true);
+      return false;
+    } finally {
+      button.disabled = !runtime.capabilities.researchRefresh;
+      button.textContent = '拉取官方更新';
+      retryButton.disabled = false;
+    }
+  })();
+
+  state.researchPromise = researchPromise;
   try {
-    if (!backendActions) throw new Error('backend actions are unavailable');
-    const result = await backendActions.refreshResearch();
-    await loadEvidence();
-    setResearchStatus(`采集完成 · 新增 ${result.stored || 0} 条`);
-  } catch (_) {
-    setResearchStatus('采集失败，可重试。', true);
+    return await researchPromise;
   } finally {
-    button.disabled = !runtime.capabilities.researchRefresh;
-    button.textContent = '拉取官方更新';
-    retryButton.disabled = false;
+    if (state.researchPromise === researchPromise) state.researchPromise = null;
   }
 }
 
