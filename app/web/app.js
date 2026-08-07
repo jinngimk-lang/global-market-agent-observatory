@@ -10,6 +10,7 @@ const state = {
   interval: runtime.market.interval,
   markers: [],
   disconnectMarket: null,
+  startupReady: false,
 };
 
 const money = (value) => Number(value || 0).toLocaleString('en-US', {maximumFractionDigits: 2});
@@ -305,6 +306,22 @@ async function runRefresh() {
   }
 }
 
+async function runStartupLoad() {
+  try {
+    await loadHealth();
+    await loadHistory();
+    state.startupReady = true;
+    return await runRefresh();
+  } catch (_) {
+    setRefreshStatus('启动数据加载失败，可重试。', true);
+    return false;
+  }
+}
+
+async function retryRefresh() {
+  return state.startupReady ? runRefresh() : runStartupLoad();
+}
+
 async function submitOrder(event) {
   event.preventDefault();
   const message = document.getElementById('order-message');
@@ -385,16 +402,12 @@ window.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('client-order-id').value = crypto.randomUUID();
   document.getElementById('order-form').addEventListener('submit', submitOrder);
   document.getElementById('refresh-button').addEventListener('click', runRefresh);
-  document.getElementById('retry-button').addEventListener('click', runRefresh);
+  document.getElementById('retry-button').addEventListener('click', retryRefresh);
   document.getElementById('research-button').addEventListener('click', refreshResearch);
   document.getElementById('research-retry-button').addEventListener('click', refreshResearch);
   applyCapabilities();
   try {
-    await loadHealth();
-    await loadHistory();
-    await runRefresh();
-  } catch (_) {
-    setRefreshStatus('启动数据加载失败，可重试。', true);
+    await runStartupLoad();
   } finally {
     connectMarket();
   }
