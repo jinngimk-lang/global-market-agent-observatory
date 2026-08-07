@@ -272,7 +272,37 @@ async function loadEvidence() {
 }
 
 async function refreshAll() {
-  await Promise.all([loadPortfolio(), loadOrders(), loadEvidence(), loadExternalAccounts(), loadCrisisWinners(), loadPartnerships()]);
+  const tasks = [loadPortfolio(), loadOrders(), loadEvidence(), loadExternalAccounts(), loadCrisisWinners(), loadPartnerships()];
+  const results = await Promise.allSettled(tasks);
+  return results.filter((result) => result.status === 'rejected');
+}
+
+function setRefreshStatus(message, failed = false) {
+  const status = document.getElementById('refresh-status');
+  const retryButton = document.getElementById('retry-button');
+  status.textContent = message;
+  status.className = failed ? 'message negative' : 'message positive';
+  retryButton.hidden = !failed;
+}
+
+async function runRefresh() {
+  const button = document.getElementById('refresh-button');
+  button.disabled = true;
+  setRefreshStatus('刷新中…');
+  try {
+    const failures = await refreshAll();
+    if (failures.length) {
+      setRefreshStatus(`部分刷新失败（${failures.length} 项），可重试。`, true);
+      return false;
+    }
+    setRefreshStatus('刷新完成');
+    return true;
+  } catch (_) {
+    setRefreshStatus('刷新失败，可重试。', true);
+    return false;
+  } finally {
+    button.disabled = !runtime.capabilities.accountRefresh;
+  }
 }
 
 async function submitOrder(event) {
@@ -300,7 +330,7 @@ async function submitOrder(event) {
   message.textContent = `成交：${data.intent.side.toUpperCase()} ${data.intent.quantity} @ ${data.filled_price}`;
   message.className = 'message positive';
   document.getElementById('client-order-id').value = crypto.randomUUID();
-  await refreshAll();
+  await runRefresh();
 }
 
 async function refreshResearch() {
@@ -335,12 +365,18 @@ window.addEventListener('DOMContentLoaded', async () => {
   initChart();
   document.getElementById('client-order-id').value = crypto.randomUUID();
   document.getElementById('order-form').addEventListener('submit', submitOrder);
-  document.getElementById('refresh-button').addEventListener('click', refreshAll);
+  document.getElementById('refresh-button').addEventListener('click', runRefresh);
+  document.getElementById('retry-button').addEventListener('click', runRefresh);
   document.getElementById('research-button').addEventListener('click', refreshResearch);
   applyCapabilities();
-  await loadHealth();
-  await loadHistory();
-  await refreshAll();
-  connectMarket();
-  if (runtime.mode === 'backend') setInterval(refreshAll, 5000);
+  try {
+    await loadHealth();
+    await loadHistory();
+    await runRefresh();
+  } catch (_) {
+    setRefreshStatus('启动数据加载失败，可重试。', true);
+  } finally {
+    connectMarket();
+  }
+  if (runtime.mode === 'backend') setInterval(runRefresh, 5000);
 });
