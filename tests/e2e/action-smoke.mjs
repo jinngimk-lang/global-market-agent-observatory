@@ -143,8 +143,15 @@ globalThis.fetch = async (url) => {
   return {ok: true, status: 200, async json() { return data; }};
 };
 
+let nextIntervalId = 101;
+const createdIntervals = [];
 const clearedIntervals = [];
-globalThis.setInterval = () => 101;
+globalThis.setInterval = () => {
+  const id = nextIntervalId;
+  nextIntervalId += 1;
+  createdIntervals.push(id);
+  return id;
+};
 globalThis.clearInterval = (id) => { clearedIntervals.push(id); };
 
 const source = fs.readFileSync(new URL('../../app/web/app.js', import.meta.url), 'utf8');
@@ -157,6 +164,7 @@ for (const handler of windowListeners.get('DOMContentLoaded') || []) {
 assert.equal(healthCalls, 1, 'startup should attempt health exactly once before recovery');
 assert.equal(historyCalls, 0, 'history should not run after a failed health load');
 assert.equal(connectCalls, 1, 'market connection must still start after startup data failure');
+assert.deepEqual(createdIntervals, [101], 'backend boot must create one background refresh interval');
 assert.match(element('refresh-status').textContent, /启动.*失败|重试/);
 assert.equal(element('retry-button').hidden, false, 'startup failure must expose recovery');
 
@@ -200,3 +208,9 @@ for (const handler of windowListeners.get('pagehide') || []) {
 }
 assert.equal(disconnectCalls, 1, 'pagehide must disconnect the market stream so navigation leaves no live socket behind');
 assert.deepEqual(clearedIntervals, [101], 'pagehide must clear the background refresh interval');
+
+for (const handler of windowListeners.get('pageshow') || []) {
+  await handler({persisted: true});
+}
+assert.equal(connectCalls, 2, 'bfcache pageshow must reconnect the market stream so browser back is not a dead end');
+assert.deepEqual(createdIntervals, [101, 102], 'bfcache pageshow must restore the background refresh interval');
