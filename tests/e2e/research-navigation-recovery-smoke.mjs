@@ -159,6 +159,7 @@ assert.match(element('research-status').textContent, /页面已恢复|可重试/
 
 releaseResearch();
 await staleResearch;
+releaseResearch = null;
 assert.equal(researchCalls, 1, 'the stale pre-navigation request must complete without being replayed');
 
 await element('research-button').dispatch('click');
