@@ -136,8 +136,10 @@ globalThis.fetch = async (url) => {
 globalThis.setInterval = () => 1;
 globalThis.clearInterval = () => {};
 
-const source = fs.readFileSync(new URL('../../app/web/app.js', import.meta.url), 'utf8');
-vm.runInThisContext(source, {filename: 'app/web/app.js'});
+const appSource = fs.readFileSync(new URL('../../app/web/app.js', import.meta.url), 'utf8');
+const recoverySource = fs.readFileSync(new URL('../../app/web/lifecycle-recovery.js', import.meta.url), 'utf8');
+vm.runInThisContext(appSource, {filename: 'app/web/app.js'});
+vm.runInThisContext(recoverySource, {filename: 'app/web/lifecycle-recovery.js'});
 
 for (const handler of windowListeners.get('DOMContentLoaded') || []) await handler();
 
@@ -150,16 +152,10 @@ assert.equal(element('research-retry-button').disabled, true, 'in-flight researc
 for (const handler of windowListeners.get('pagehide') || []) await handler({persisted: true});
 for (const handler of windowListeners.get('pageshow') || []) await handler({persisted: true});
 
-assert.equal(
-  element('research-button').disabled,
-  false,
-  'bfcache recovery must restore the research primary control for the current lifecycle',
-);
-assert.equal(
-  element('research-retry-button').disabled,
-  false,
-  'bfcache recovery must restore research retry so navigation cannot leave a dead end',
-);
+assert.equal(element('research-button').disabled, false, 'bfcache recovery must restore the research primary control for the current lifecycle');
+assert.equal(element('research-retry-button').disabled, false, 'bfcache recovery must restore research retry so navigation cannot leave a dead end');
+assert.equal(element('research-retry-button').hidden, false, 'recovery must expose a visible retry route');
+assert.match(element('research-status').textContent, /页面已恢复|可重试/);
 
 releaseResearch();
 await staleResearch;
