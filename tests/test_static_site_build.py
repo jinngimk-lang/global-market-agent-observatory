@@ -16,6 +16,7 @@ def test_static_site_build_is_relative_observe_only_and_secret_free(tmp_path) ->
         "runtime.js",
         "market-client.js",
         "app.js",
+        "lifecycle-recovery.js",
         "config.js",
         "demo-data.js",
         ".nojekyll",
@@ -31,6 +32,7 @@ def test_static_site_build_is_relative_observe_only_and_secret_free(tmp_path) ->
     assert 'src="./config.js"' in index
     assert 'src="./demo-data.js"' in index
     assert 'src="./app.js"' in index
+    assert 'src="./lifecycle-recovery.js"' in index
     assert "Content-Security-Policy" in index
     assert "https://api.binance.com" in index
     assert "wss://stream.binance.com:9443" in index
