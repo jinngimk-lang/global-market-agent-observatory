@@ -149,6 +149,8 @@ await Promise.resolve();
 assert.equal(element('research-button').disabled, true, 'in-flight research must disable the primary control');
 assert.equal(element('research-retry-button').disabled, true, 'in-flight research must disable retry');
 
+// Recovery must follow action state, not a specific localized button label.
+element('research-button').textContent = 'Collecting official updates…';
 for (const handler of windowListeners.get('pagehide') || []) await handler({persisted: true});
 for (const handler of windowListeners.get('pageshow') || []) await handler({persisted: true});
 
