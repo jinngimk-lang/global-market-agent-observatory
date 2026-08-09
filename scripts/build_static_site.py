@@ -34,7 +34,13 @@ DEMO_DATA = """window.OBSERVATORY_DEMO_DATA = Object.freeze({
 STATIC_CSP_META = """  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self'; connect-src https://api.binance.com wss://stream.binance.com:9443; img-src 'self' data:; object-src 'none'; base-uri 'none'; form-action 'none'">
 """
 
-ASSET_NAMES = ("styles.css", "runtime.js", "market-client.js", "app.js")
+ASSET_NAMES = (
+    "styles.css",
+    "runtime.js",
+    "market-client.js",
+    "app.js",
+    "lifecycle-recovery.js",
+)
 
 
 def build_static_site(source_root: Path, output_root: Path) -> None:
