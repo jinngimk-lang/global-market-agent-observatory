@@ -10,9 +10,9 @@
   }
 
   window.addEventListener('pagehide', () => {
-    const {primary} = researchControls();
+    const {primary, retry} = researchControls();
     researchInterrupted = Boolean(
-      primary?.disabled && primary.textContent === '采集中…',
+      primary?.disabled && retry?.disabled,
     );
   });
 
