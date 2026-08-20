@@ -7,6 +7,7 @@ from pydantic import SecretStr
 
 from app.broker.alpaca import AlpacaExecutionAdapter
 from app.broker.execution_factory import build_execution_adapter
+from app.broker.ibkr import IBKRExecutionAdapter
 from app.broker.paper_execution import PaperExecutionAdapter
 from app.domain.models import ExecutionProvider, OrderIntent, OrderStatus, Side, TradingMode
 from app.settings import Settings
@@ -81,6 +82,44 @@ def test_broker_paper_rejects_non_paper_alpaca_endpoint(tmp_path) -> None:
         build_execution_adapter(settings, make_store(tmp_path))
 
 
+def test_broker_paper_ibkr_requires_explicit_gateway_configuration(tmp_path) -> None:
+    settings = Settings(
+        trading_mode=TradingMode.BROKER_PAPER,
+        execution_provider=ExecutionProvider.IBKR,
+    )
+
+    with pytest.raises(ValueError, match="IBKR execution requires"):
+        build_execution_adapter(settings, make_store(tmp_path))
+
+
+def test_broker_paper_builds_ibkr_adapter_only_when_account_is_marked_paper(tmp_path) -> None:
+    settings = Settings(
+        trading_mode=TradingMode.BROKER_PAPER,
+        execution_provider=ExecutionProvider.IBKR,
+        ibkr_enabled=True,
+        ibkr_account_id="DU123",
+        ibkr_paper=True,
+        ibkr_auto_confirm_message_ids={"o163"},
+    )
+
+    adapter = build_execution_adapter(settings, make_store(tmp_path))
+
+    assert isinstance(adapter, IBKRExecutionAdapter)
+
+
+def test_broker_paper_rejects_ibkr_account_marked_live(tmp_path) -> None:
+    settings = Settings(
+        trading_mode=TradingMode.BROKER_PAPER,
+        execution_provider=ExecutionProvider.IBKR,
+        ibkr_enabled=True,
+        ibkr_account_id="U123",
+        ibkr_paper=False,
+    )
+
+    with pytest.raises(ValueError, match="IBKR_PAPER=true"):
+        build_execution_adapter(settings, make_store(tmp_path))
+
+
 def test_live_mode_rejects_local_paper_execution_provider(tmp_path) -> None:
     settings = Settings(
         trading_mode=TradingMode.LIVE,
@@ -122,3 +161,34 @@ def test_explicit_live_alpaca_configuration_builds_live_adapter(tmp_path) -> Non
     adapter = build_execution_adapter(settings, make_store(tmp_path))
 
     assert isinstance(adapter, AlpacaExecutionAdapter)
+
+
+def test_live_ibkr_rejects_account_marked_paper(tmp_path) -> None:
+    settings = Settings(
+        trading_mode=TradingMode.LIVE,
+        execution_provider=ExecutionProvider.IBKR,
+        live_trading_enabled=True,
+        live_trading_confirmation="I_UNDERSTAND_LIVE_TRADING",
+        ibkr_enabled=True,
+        ibkr_account_id="DU123",
+        ibkr_paper=True,
+    )
+
+    with pytest.raises(ValueError, match="IBKR_PAPER=false"):
+        build_execution_adapter(settings, make_store(tmp_path))
+
+
+def test_explicit_live_ibkr_configuration_builds_live_adapter(tmp_path) -> None:
+    settings = Settings(
+        trading_mode=TradingMode.LIVE,
+        execution_provider=ExecutionProvider.IBKR,
+        live_trading_enabled=True,
+        live_trading_confirmation="I_UNDERSTAND_LIVE_TRADING",
+        ibkr_enabled=True,
+        ibkr_account_id="U123",
+        ibkr_paper=False,
+    )
+
+    adapter = build_execution_adapter(settings, make_store(tmp_path))
+
+    assert isinstance(adapter, IBKRExecutionAdapter)
