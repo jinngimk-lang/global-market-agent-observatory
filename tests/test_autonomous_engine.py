@@ -134,7 +134,7 @@ async def test_updated_bar_is_stored_but_never_creates_new_execution(tmp_path) -
 
 
 @pytest.mark.asyncio
-async def test_replaying_same_actionable_bar_reuses_same_order_id(tmp_path) -> None:
+async def test_replaying_completed_actionable_bar_is_skipped_persistently(tmp_path) -> None:
     engine, store = build_engine(tmp_path)
     first = bar(0, 199)
     second = bar(1, 201)
@@ -143,5 +143,20 @@ async def test_replaying_same_actionable_bar_reuses_same_order_id(tmp_path) -> N
 
     replay = await engine.on_candle(second, now=second.close_time)
 
-    assert original.executions[0].broker_order_id == replay.executions[0].broker_order_id
+    assert original.executions[0].status is OrderStatus.FILLED
+    assert replay.skipped_reason == "cycle_already_completed"
+    assert replay.executions == []
     assert len(store.list_orders()) == 1
+
+
+def test_completed_cycle_checkpoint_survives_engine_restart(tmp_path) -> None:
+    first_engine, _ = build_engine(tmp_path)
+    cycle = bar(0, 199)
+
+    import asyncio
+
+    asyncio.run(first_engine.on_candle(cycle, now=cycle.close_time))
+    second_engine, _ = build_engine(tmp_path)
+    replay = asyncio.run(second_engine.on_candle(cycle, now=cycle.close_time))
+
+    assert replay.skipped_reason == "cycle_already_completed"
