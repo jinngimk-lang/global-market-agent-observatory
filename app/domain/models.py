@@ -260,8 +260,13 @@ class ExternalAccountSnapshot(BaseModel):
     status: str = "connected"
     base_currency: str | None = None
     equity: Decimal | None = None
+    prior_equity: Decimal | None = None
+    daily_pnl: Decimal | None = None
     cash: Decimal | None = None
     buying_power: Decimal | None = None
+    trading_blocked: bool | None = None
+    account_blocked: bool | None = None
+    trade_suspended_by_user: bool | None = None
     balances: list[ObservedBalance] = Field(default_factory=list)
     positions: list[ObservedPosition] = Field(default_factory=list)
     orders: list[ObservedOrder] = Field(default_factory=list)
