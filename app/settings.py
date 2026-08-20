@@ -46,6 +46,8 @@ class Settings(BaseModel):
     ibkr_account_id: str | None = None
     ibkr_base_url: str = "https://localhost:5000/v1/api"
     ibkr_verify_ssl: bool = False
+    ibkr_paper: bool = True
+    ibkr_auto_confirm_message_ids: set[str] = Field(default_factory=set)
     sec_user_agent: str = "Observatory admin@example.com"
     sec_ciks: list[str] = Field(default_factory=list)
     github_release_repositories: list[str] = Field(
@@ -97,6 +99,11 @@ class Settings(BaseModel):
             if item.strip()
         }
         sec_ciks = [item.strip() for item in os.getenv("SEC_CIKS", "").split(",") if item.strip()]
+        ibkr_auto_confirm_message_ids = {
+            item.strip()
+            for item in os.getenv("IBKR_AUTO_CONFIRM_MESSAGE_IDS", "").split(",")
+            if item.strip()
+        }
         repositories = [
             item.strip()
             for item in os.getenv(
@@ -158,6 +165,8 @@ class Settings(BaseModel):
             ibkr_account_id=os.getenv("IBKR_ACCOUNT_ID") or None,
             ibkr_base_url=os.getenv("IBKR_BASE_URL", "https://localhost:5000/v1/api"),
             ibkr_verify_ssl=os.getenv("IBKR_VERIFY_SSL", "false").lower() in {"1", "true", "yes"},
+            ibkr_paper=os.getenv("IBKR_PAPER", "true").lower() in {"1", "true", "yes"},
+            ibkr_auto_confirm_message_ids=ibkr_auto_confirm_message_ids,
             sec_user_agent=os.getenv("SEC_USER_AGENT", "Observatory admin@example.com"),
             sec_ciks=sec_ciks,
             github_release_repositories=repositories,
