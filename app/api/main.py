@@ -12,7 +12,14 @@ from pydantic import BaseModel, ConfigDict
 
 from app.api.state import ApplicationState
 from app.broker.base import AccountObserver
-from app.domain.models import OrderIntent, OrderRecord, PortfolioSnapshot, Side
+from app.domain.models import (
+    ExecutionProvider,
+    OrderIntent,
+    OrderRecord,
+    PortfolioSnapshot,
+    Side,
+    TradingMode,
+)
 from app.research.github_releases import GitHubReleaseCollector
 from app.research.partnerships import assess_partnership
 from app.research.sec import SECCollector
@@ -31,14 +38,21 @@ class OrderRequest(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     trading_mode: str
-    live_trading_enabled: bool
+    execution_provider: str
+    auto_trading_enabled: bool
+    live_execution_permitted: bool
+    trading_state: str
     market_source: str
     market_symbol: str
+    trading_universe: list[str]
     subscribers: int
+    cycle_error_count: int
 
 
 def create_app(
-    settings: Settings | None = None, *, observers: list[AccountObserver] | None = None
+    settings: Settings | None = None,
+    *,
+    observers: list[AccountObserver] | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_env()
     runtime = ApplicationState(resolved_settings, observers=observers)
@@ -51,7 +65,7 @@ def create_app(
         finally:
             await runtime.stop()
 
-    app = FastAPI(title=resolved_settings.app_name, version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title=resolved_settings.app_name, version="0.2.0", lifespan=lifespan)
     app.state.runtime = runtime
 
     @app.middleware("http")
@@ -81,13 +95,35 @@ def create_app(
     @app.get("/api/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
         return HealthResponse(
-            status="ok",
-            trading_mode="paper",
-            live_trading_enabled=resolved_settings.live_trading_enabled,
+            status="ok" if runtime.trading_state.value != "halted" else "halted",
+            trading_mode=resolved_settings.trading_mode.value,
+            execution_provider=resolved_settings.execution_provider.value,
+            auto_trading_enabled=resolved_settings.auto_trading_enabled,
+            live_execution_permitted=resolved_settings.live_execution_permitted,
+            trading_state=runtime.trading_state.value,
             market_source=resolved_settings.market_source,
             market_symbol=resolved_settings.market_symbol,
+            trading_universe=sorted(resolved_settings.trading_universe),
             subscribers=runtime.hub.subscriber_count,
+            cycle_error_count=len(runtime.last_cycle_errors),
         )
+
+    @app.get("/api/trading/status")
+    async def trading_status() -> dict:
+        return {
+            "trading_mode": resolved_settings.trading_mode.value,
+            "execution_provider": resolved_settings.execution_provider.value,
+            "auto_trading_enabled": resolved_settings.auto_trading_enabled,
+            "live_execution_permitted": resolved_settings.live_execution_permitted,
+            "trading_state": runtime.trading_state.value,
+            "market_source": resolved_settings.market_source,
+            "trading_universe": sorted(resolved_settings.trading_universe),
+            "last_cycles": {
+                symbol: cycle.model_dump(mode="json")
+                for symbol, cycle in sorted(runtime.last_cycle_results.items())
+            },
+            "cycle_errors": dict(sorted(runtime.last_cycle_errors.items())),
+        }
 
     @app.get("/api/candles/{symbol}")
     async def candles(
@@ -102,8 +138,27 @@ def create_app(
 
     @app.post("/api/orders", response_model=OrderRecord, status_code=status.HTTP_201_CREATED)
     async def submit_order(request: OrderRequest) -> OrderRecord:
+        if (
+            resolved_settings.execution_provider is not ExecutionProvider.PAPER
+            or resolved_settings.trading_mode
+            not in {TradingMode.REPLAY, TradingMode.PAPER}
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "legacy_order_api_disabled",
+                    "message": (
+                        "The unauthenticated legacy order endpoint is restricted to "
+                        "local paper execution and can never route to a live broker."
+                    ),
+                },
+            )
+
         symbol = request.symbol.strip().upper()
-        latest = runtime.store.latest_candle(symbol, interval=resolved_settings.market_interval)
+        latest = runtime.store.latest_candle(
+            symbol,
+            interval=resolved_settings.market_interval,
+        )
         if latest is None:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
@@ -130,21 +185,48 @@ def create_app(
 
     @app.get("/api/portfolio", response_model=PortfolioSnapshot)
     async def portfolio() -> PortfolioSnapshot:
-        return runtime.broker.snapshot()
+        try:
+            state = await runtime.portfolio_source.snapshot()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "portfolio_reconciliation_unavailable",
+                    "message": f"{type(exc).__name__}: {exc}",
+                },
+            ) from exc
+        return state.portfolio
 
     @app.get("/api/orders")
     async def orders(limit: int = Query(default=200, ge=1, le=1000)) -> list[dict]:
-        return [item.model_dump(mode="json") for item in runtime.store.list_orders(limit=limit)]
+        return [
+            item.model_dump(mode="json")
+            for item in runtime.store.list_orders(limit=limit)
+        ]
+
+    @app.get("/api/audit")
+    async def audit(limit: int = Query(default=200, ge=1, le=2000)) -> list[dict]:
+        return [
+            item.model_dump(mode="json")
+            for item in runtime.audit.list_events(limit=limit)
+        ]
 
     @app.get("/api/accounts")
     async def accounts() -> dict:
         return {
-            "live_execution_enabled": False,
+            "execution_provider": resolved_settings.execution_provider.value,
+            "live_execution_permitted": resolved_settings.live_execution_permitted,
             "accounts": [
                 {
                     "name": name,
-                    "status": "error" if name in runtime.account_errors else (
-                        "connected" if name in runtime.account_snapshots else "connecting"
+                    "status": (
+                        "error"
+                        if name in runtime.account_errors
+                        else (
+                            "connected"
+                            if name in runtime.account_snapshots
+                            else "connecting"
+                        )
                     ),
                     "error": runtime.account_errors.get(name),
                     "snapshot": (
@@ -159,23 +241,33 @@ def create_app(
 
     @app.get("/api/evidence")
     async def evidence(limit: int = Query(default=200, ge=1, le=2000)) -> list[dict]:
-        return [item.model_dump(mode="json") for item in runtime.store.list_evidence(limit=limit)]
+        return [
+            item.model_dump(mode="json")
+            for item in runtime.store.list_evidence(limit=limit)
+        ]
 
     @app.get("/api/research/crisis-winners")
-    async def crisis_winners(limit: int = Query(default=200, ge=1, le=2000)) -> list[dict]:
+    async def crisis_winners(
+        limit: int = Query(default=200, ge=1, le=2000),
+    ) -> list[dict]:
         return [
             item.model_dump(mode="json")
             for item in runtime.store.list_crisis_winners(limit=limit)
         ]
 
     @app.get("/api/research/partnerships")
-    async def partnerships(limit: int = Query(default=200, ge=1, le=2000)) -> list[dict]:
+    async def partnerships(
+        limit: int = Query(default=200, ge=1, le=2000),
+    ) -> list[dict]:
         source_items = [
             item
             for item in runtime.store.list_evidence(limit=limit)
             if "partnership" in item.tags or "material-agreement" in item.tags
         ]
-        return [assess_partnership(item).model_dump(mode="json") for item in source_items]
+        return [
+            assess_partnership(item).model_dump(mode="json")
+            for item in source_items
+        ]
 
     @app.post("/api/research/refresh")
     async def refresh_research() -> dict[str, int]:
@@ -210,7 +302,10 @@ def create_app(
     async def index() -> FileResponse:
         index_path = web_root / "index.html"
         if not index_path.exists():
-            raise HTTPException(status_code=404, detail="Dashboard assets are not installed")
+            raise HTTPException(
+                status_code=404,
+                detail="Dashboard assets are not installed",
+            )
         return FileResponse(index_path)
 
     return app
