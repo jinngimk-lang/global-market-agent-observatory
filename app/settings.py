@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
-from app.domain.models import TradingMode
+from app.domain.models import ExecutionProvider, TradingMode
 
 LIVE_CONFIRMATION_PHRASE = "I_UNDERSTAND_LIVE_TRADING"
 
@@ -16,6 +16,7 @@ class Settings(BaseModel):
     app_name: str = "Global Market Autonomous Trading Platform"
     database_path: str = "data/observatory.db"
     trading_mode: TradingMode = TradingMode.PAPER
+    execution_provider: ExecutionProvider = ExecutionProvider.PAPER
     market_source: str = "replay"
     market_symbol: str = "BTCUSDT"
     market_interval: str = "1m"
@@ -24,8 +25,12 @@ class Settings(BaseModel):
     starting_cash: Decimal = Decimal("100000")
     allowed_symbols: set[str] = Field(default_factory=lambda: {"BTCUSDT", "ETHUSDT"})
     max_order_notional: Decimal = Decimal("10000")
+    max_symbol_exposure: Decimal = Decimal("25000")
     max_gross_exposure: Decimal = Decimal("50000")
     daily_loss_limit: Decimal = Decimal("2000")
+    max_portfolio_drawdown: Decimal = Decimal("5000")
+    market_data_max_age_seconds: float = 5.0
+    account_state_max_age_seconds: float = 30.0
     live_trading_enabled: bool = False
     live_trading_confirmation: str | None = None
     account_poll_seconds: float = 15.0
@@ -106,6 +111,9 @@ class Settings(BaseModel):
         return cls(
             database_path=os.getenv("DATABASE_PATH", "data/observatory.db"),
             trading_mode=os.getenv("TRADING_MODE", TradingMode.PAPER.value).strip().lower(),
+            execution_provider=os.getenv(
+                "EXECUTION_PROVIDER", ExecutionProvider.PAPER.value
+            ).strip().lower(),
             market_source=os.getenv("MARKET_SOURCE", "replay").strip().lower(),
             market_symbol=os.getenv("MARKET_SYMBOL", "BTCUSDT"),
             market_interval=os.getenv("MARKET_INTERVAL", "1m"),
@@ -114,8 +122,12 @@ class Settings(BaseModel):
             starting_cash=Decimal(os.getenv("STARTING_CASH", "100000")),
             allowed_symbols=allowed_symbols,
             max_order_notional=Decimal(os.getenv("MAX_ORDER_NOTIONAL", "10000")),
+            max_symbol_exposure=Decimal(os.getenv("MAX_SYMBOL_EXPOSURE", "25000")),
             max_gross_exposure=Decimal(os.getenv("MAX_GROSS_EXPOSURE", "50000")),
             daily_loss_limit=Decimal(os.getenv("DAILY_LOSS_LIMIT", "2000")),
+            max_portfolio_drawdown=Decimal(os.getenv("MAX_PORTFOLIO_DRAWDOWN", "5000")),
+            market_data_max_age_seconds=float(os.getenv("MARKET_DATA_MAX_AGE_SECONDS", "5")),
+            account_state_max_age_seconds=float(os.getenv("ACCOUNT_STATE_MAX_AGE_SECONDS", "30")),
             live_trading_enabled=os.getenv("LIVE_TRADING_ENABLED", "false").lower()
             in {"1", "true", "yes"},
             live_trading_confirmation=os.getenv("LIVE_TRADING_CONFIRMATION") or None,
