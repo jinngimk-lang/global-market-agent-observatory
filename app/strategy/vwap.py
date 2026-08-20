@@ -30,6 +30,7 @@ class VWAPStrategy:
                 rationale_codes=["vwap_reclaim"],
                 entry_price=market.current_price,
                 invalidation_price=level,
+                generated_at=market.observed_at,
             )
 
         if previous >= level and market.current_price < level:
@@ -42,6 +43,7 @@ class VWAPStrategy:
                 rationale_codes=["vwap_rejection"],
                 entry_price=market.current_price,
                 invalidation_price=level,
+                generated_at=market.observed_at,
             )
 
         return hold_signal(
