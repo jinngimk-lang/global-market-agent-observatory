@@ -128,13 +128,26 @@ class PortfolioSnapshot(BaseModel):
         return self.cash + market_value
 
 
+class RiskContext(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    trading_state: TradingState = TradingState.ACTIVE
+    market_data_age_seconds: float = 0.0
+    account_state_age_seconds: float = 0.0
+    portfolio_drawdown: Decimal = Decimal("0")
+
+
 class RiskLimits(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     allowed_symbols: set[str] = Field(default_factory=lambda: {"BTCUSDT", "ETHUSDT"})
     max_order_notional: Decimal = Decimal("10000")
+    max_symbol_exposure: Decimal = Decimal("25000")
     max_gross_exposure: Decimal = Decimal("50000")
     daily_loss_limit: Decimal = Decimal("2000")
+    max_portfolio_drawdown: Decimal = Decimal("5000")
+    market_data_max_age_seconds: float = 5.0
+    account_state_max_age_seconds: float = 30.0
 
     @field_validator("allowed_symbols")
     @classmethod
