@@ -74,6 +74,7 @@ class IBKRObserver:
             status="connected",
             base_currency=currency,
             equity=self._summary_amount(summary, "netliquidation"),
+            daily_pnl=self._summary_amount(summary, "dailypnl"),
             cash=self._summary_amount(summary, "totalcashvalue"),
             buying_power=self._summary_amount(summary, "availablefunds"),
             positions=[self._map_position(item) for item in positions_payload],
