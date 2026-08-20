@@ -17,13 +17,28 @@ class Settings(BaseModel):
     database_path: str = "data/observatory.db"
     trading_mode: TradingMode = TradingMode.PAPER
     execution_provider: ExecutionProvider = ExecutionProvider.PAPER
+    auto_trading_enabled: bool = False
+    trading_universe: set[str] = Field(default_factory=lambda: {"NVDA", "SPCX", "KLAC"})
+    symbol_groups: dict[str, str] = Field(
+        default_factory=lambda: {
+            "NVDA": "semiconductor-ai",
+            "KLAC": "semiconductor-ai",
+            "SPCX": "growth-tech",
+        }
+    )
+    risk_fraction_per_trade: Decimal = Decimal("0.01")
+    max_group_exposure: Decimal = Decimal("25000")
+    reduce_fraction: Decimal = Decimal("0.5")
     market_source: str = "replay"
     market_symbol: str = "BTCUSDT"
     market_interval: str = "1m"
+    alpaca_market_data_feed: str = "iex"
     replay_delay_seconds: float = 0.4
     replay_seed: int = 42
     starting_cash: Decimal = Decimal("100000")
-    allowed_symbols: set[str] = Field(default_factory=lambda: {"BTCUSDT", "ETHUSDT"})
+    allowed_symbols: set[str] = Field(
+        default_factory=lambda: {"NVDA", "SPCX", "KLAC", "BTCUSDT", "ETHUSDT"}
+    )
     max_order_notional: Decimal = Decimal("10000")
     max_symbol_exposure: Decimal = Decimal("25000")
     max_gross_exposure: Decimal = Decimal("50000")
@@ -65,13 +80,38 @@ class Settings(BaseModel):
     def normalize_market_symbol(cls, value: str) -> str:
         return value.strip().upper()
 
-    @field_validator("allowed_symbols")
+    @field_validator("allowed_symbols", "trading_universe")
     @classmethod
-    def normalize_allowed_symbols(cls, values: set[str]) -> set[str]:
-        return {value.strip().upper() for value in values}
+    def normalize_symbol_sets(cls, values: set[str]) -> set[str]:
+        return {value.strip().upper() for value in values if value.strip()}
+
+    @field_validator("symbol_groups")
+    @classmethod
+    def normalize_symbol_groups(cls, values: dict[str, str]) -> dict[str, str]:
+        return {
+            symbol.strip().upper(): group.strip()
+            for symbol, group in values.items()
+            if symbol.strip() and group.strip()
+        }
+
+    @field_validator("risk_fraction_per_trade", "reduce_fraction")
+    @classmethod
+    def validate_fraction(cls, value: Decimal) -> Decimal:
+        if value <= 0 or value > 1:
+            raise ValueError("portfolio fractions must be in (0, 1]")
+        return value
+
+    @field_validator("max_group_exposure")
+    @classmethod
+    def validate_group_exposure(cls, value: Decimal) -> Decimal:
+        if value <= 0:
+            raise ValueError("MAX_GROUP_EXPOSURE must be positive")
+        return value
 
     @model_validator(mode="after")
-    def validate_live_execution_gate(self) -> Settings:
+    def validate_runtime_safety(self) -> Settings:
+        if self.auto_trading_enabled and not self.trading_universe:
+            raise ValueError("AUTO_TRADING_ENABLED requires a non-empty TRADING_UNIVERSE")
         if self.trading_mode is not TradingMode.LIVE:
             return self
         if not self.live_trading_enabled:
@@ -95,9 +135,28 @@ class Settings(BaseModel):
     def from_env(cls) -> Settings:
         allowed_symbols = {
             item.strip().upper()
-            for item in os.getenv("ALLOWED_SYMBOLS", "BTCUSDT,ETHUSDT").split(",")
+            for item in os.getenv(
+                "ALLOWED_SYMBOLS",
+                "NVDA,SPCX,KLAC,BTCUSDT,ETHUSDT",
+            ).split(",")
             if item.strip()
         }
+        trading_universe = {
+            item.strip().upper()
+            for item in os.getenv("TRADING_UNIVERSE", "NVDA,SPCX,KLAC").split(",")
+            if item.strip()
+        }
+        symbol_groups: dict[str, str] = {}
+        raw_groups = os.getenv(
+            "SYMBOL_GROUPS",
+            "NVDA=semiconductor-ai,KLAC=semiconductor-ai,SPCX=growth-tech",
+        )
+        for item in raw_groups.split(","):
+            if not item.strip() or "=" not in item:
+                continue
+            symbol, group = item.split("=", 1)
+            if symbol.strip() and group.strip():
+                symbol_groups[symbol.strip().upper()] = group.strip()
         sec_ciks = [item.strip() for item in os.getenv("SEC_CIKS", "").split(",") if item.strip()]
         ibkr_auto_confirm_message_ids = {
             item.strip()
@@ -121,9 +180,17 @@ class Settings(BaseModel):
             execution_provider=os.getenv(
                 "EXECUTION_PROVIDER", ExecutionProvider.PAPER.value
             ).strip().lower(),
+            auto_trading_enabled=os.getenv("AUTO_TRADING_ENABLED", "false").lower()
+            in {"1", "true", "yes"},
+            trading_universe=trading_universe,
+            symbol_groups=symbol_groups,
+            risk_fraction_per_trade=Decimal(os.getenv("RISK_FRACTION_PER_TRADE", "0.01")),
+            max_group_exposure=Decimal(os.getenv("MAX_GROUP_EXPOSURE", "25000")),
+            reduce_fraction=Decimal(os.getenv("REDUCE_FRACTION", "0.5")),
             market_source=os.getenv("MARKET_SOURCE", "replay").strip().lower(),
             market_symbol=os.getenv("MARKET_SYMBOL", "BTCUSDT"),
             market_interval=os.getenv("MARKET_INTERVAL", "1m"),
+            alpaca_market_data_feed=os.getenv("ALPACA_MARKET_DATA_FEED", "iex").strip().lower(),
             replay_delay_seconds=float(os.getenv("REPLAY_DELAY_SECONDS", "0.4")),
             replay_seed=int(os.getenv("REPLAY_SEED", "42")),
             starting_cash=Decimal(os.getenv("STARTING_CASH", "100000")),
