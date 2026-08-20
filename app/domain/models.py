@@ -34,6 +34,7 @@ class OrderStatus(StrEnum):
     ACCEPTED = "accepted"
     FILLED = "filled"
     REJECTED = "rejected"
+    CANCELLED = "cancelled"
     UNKNOWN = "unknown"
 
 
