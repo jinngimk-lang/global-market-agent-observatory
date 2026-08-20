@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.research.market_intelligence import MarketStructureSnapshot
 from app.strategy.base import StrategyAction, StrategyInput
 from app.strategy.gamma_levels import GammaLevelsStrategy
 from app.strategy.vwap import VWAPStrategy
+
+OBSERVED_AT = datetime(2026, 8, 20, 14, 0, tzinfo=UTC)
 
 
 def market_input(
@@ -28,6 +31,7 @@ def market_input(
             call_wall=(Decimal(call_wall) if call_wall is not None else None),
             order_flow_imbalance=(Decimal(imbalance) if imbalance is not None else None),
         ),
+        observed_at=OBSERVED_AT,
     )
 
 
@@ -109,3 +113,13 @@ def test_missing_structure_returns_hold_not_guess() -> None:
 
     assert signal.action is StrategyAction.HOLD
     assert "insufficient_structure" in signal.rationale_codes
+
+
+def test_signal_timestamp_is_market_observation_time_for_replay_idempotency() -> None:
+    market = market_input(current="201", previous="199", vwap="200")
+
+    first = VWAPStrategy().evaluate(market)
+    second = VWAPStrategy().evaluate(market)
+
+    assert first.generated_at == OBSERVED_AT
+    assert second.generated_at == OBSERVED_AT
