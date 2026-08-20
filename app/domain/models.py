@@ -36,6 +36,15 @@ class OrderStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class AuditEventType(StrEnum):
+    STRATEGY_SIGNAL = "strategy_signal"
+    RISK_DECISION = "risk_decision"
+    EXECUTION = "execution"
+    RECONCILIATION = "reconciliation"
+    KILL_SWITCH = "kill_switch"
+    SYSTEM = "system"
+
+
 class EvidenceGrade(StrEnum):
     A = "A"
     B = "B"
@@ -174,6 +183,16 @@ class OrderRecord(BaseModel):
     message: str = ""
     filled_price: Decimal | None = None
     filled_at: datetime | None = None
+
+
+class AuditEvent(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    event_id: str
+    event_type: AuditEventType
+    subject: str | None = None
+    payload: dict[str, object] = Field(default_factory=dict)
+    occurred_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class EvidenceItem(BaseModel):
