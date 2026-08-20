@@ -1,6 +1,14 @@
 from decimal import Decimal
 
-from app.domain.models import OrderIntent, PortfolioSnapshot, Position, RiskLimits, Side
+from app.domain.models import (
+    OrderIntent,
+    PortfolioSnapshot,
+    Position,
+    RiskContext,
+    RiskLimits,
+    Side,
+    TradingState,
+)
 from app.risk.engine import RiskEngine
 
 
@@ -112,3 +120,96 @@ def test_rejects_after_daily_loss_limit_is_reached() -> None:
 
     assert decision.allowed is False
     assert decision.code == "daily_loss_lockout"
+
+
+def test_rejects_projected_symbol_exposure() -> None:
+    engine = RiskEngine(
+        RiskLimits(
+            allowed_symbols={"BTCUSDT"},
+            max_order_notional=Decimal("10000"),
+            max_symbol_exposure=Decimal("150"),
+            max_gross_exposure=Decimal("50000"),
+        )
+    )
+
+    decision = engine.evaluate(
+        make_intent(quantity="2", price="100"),
+        PortfolioSnapshot(cash=Decimal("10000")),
+    )
+
+    assert decision.allowed is False
+    assert decision.code == "symbol_exposure_limit"
+
+
+def test_rejects_stale_market_data() -> None:
+    engine = RiskEngine(
+        RiskLimits(allowed_symbols={"BTCUSDT"}, market_data_max_age_seconds=5.0)
+    )
+
+    decision = engine.evaluate(
+        make_intent(),
+        PortfolioSnapshot(cash=Decimal("10000")),
+        RiskContext(market_data_age_seconds=5.1),
+    )
+
+    assert decision.allowed is False
+    assert decision.code == "stale_market_data"
+
+
+def test_rejects_stale_account_state() -> None:
+    engine = RiskEngine(
+        RiskLimits(allowed_symbols={"BTCUSDT"}, account_state_max_age_seconds=30.0)
+    )
+
+    decision = engine.evaluate(
+        make_intent(),
+        PortfolioSnapshot(cash=Decimal("10000")),
+        RiskContext(account_state_age_seconds=31.0),
+    )
+
+    assert decision.allowed is False
+    assert decision.code == "stale_account_state"
+
+
+def test_halted_risk_context_blocks_orders() -> None:
+    engine = RiskEngine(RiskLimits(allowed_symbols={"BTCUSDT"}))
+
+    decision = engine.evaluate(
+        make_intent(),
+        PortfolioSnapshot(cash=Decimal("10000")),
+        RiskContext(trading_state=TradingState.HALTED),
+    )
+
+    assert decision.allowed is False
+    assert decision.code == "trading_halted"
+
+
+def test_reducing_context_rejects_exposure_increase() -> None:
+    engine = RiskEngine(RiskLimits(allowed_symbols={"BTCUSDT"}))
+
+    decision = engine.evaluate(
+        make_intent(),
+        PortfolioSnapshot(cash=Decimal("10000")),
+        RiskContext(trading_state=TradingState.REDUCING),
+    )
+
+    assert decision.allowed is False
+    assert decision.code == "reducing_only"
+
+
+def test_drawdown_lockout_blocks_new_orders() -> None:
+    engine = RiskEngine(
+        RiskLimits(
+            allowed_symbols={"BTCUSDT"},
+            max_portfolio_drawdown=Decimal("1000"),
+        )
+    )
+
+    decision = engine.evaluate(
+        make_intent(),
+        PortfolioSnapshot(cash=Decimal("10000")),
+        RiskContext(portfolio_drawdown=Decimal("1000")),
+    )
+
+    assert decision.allowed is False
+    assert decision.code == "portfolio_drawdown_lockout"
