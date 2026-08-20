@@ -42,6 +42,8 @@ class ExecutionController:
     ) -> ExecutionAttempt:
         existing = await self._adapter.get_order_by_client_id(intent.client_order_id)
         if existing is not None:
+            if existing.status is OrderStatus.UNKNOWN:
+                self._trading_state = TradingState.HALTED
             return ExecutionAttempt(result=existing, reused_existing=True)
 
         effective_context = (context or RiskContext()).model_copy(
