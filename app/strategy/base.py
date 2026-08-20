@@ -73,4 +73,5 @@ def hold_signal(
         confidence=Decimal("0"),
         rationale_codes=[rationale_code],
         entry_price=market.current_price,
+        generated_at=market.observed_at,
     )
