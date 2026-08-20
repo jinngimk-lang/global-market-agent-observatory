@@ -83,6 +83,9 @@ class AlpacaStockBarFeed:
 
     def _bar_to_candle(self, item: dict[str, Any]) -> Candle:
         opened = self._parse_timestamp(str(item["t"]))
+        source = f"alpaca:{self.feed}"
+        if item.get("T") == "u":
+            source = f"{source}:updated"
         return Candle(
             symbol=str(item["S"]),
             interval="1m",
@@ -93,7 +96,7 @@ class AlpacaStockBarFeed:
             low=float(item["l"]),
             close=float(item["c"]),
             volume=float(item["v"]),
-            source=f"alpaca:{self.feed}",
+            source=source,
             closed=True,
         )
 
