@@ -14,6 +14,12 @@ class TradingMode(StrEnum):
     LIVE = "live"
 
 
+class ExecutionProvider(StrEnum):
+    PAPER = "paper"
+    ALPACA = "alpaca"
+    IBKR = "ibkr"
+
+
 class TradingState(StrEnum):
     ACTIVE = "active"
     REDUCING = "reducing"
