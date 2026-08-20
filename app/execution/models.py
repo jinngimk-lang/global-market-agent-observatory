@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.domain.models import OrderStatus
+from app.domain.models import OrderStatus, RiskDecision
 
 
 class ExecutionResult(BaseModel):
@@ -16,3 +16,11 @@ class ExecutionResult(BaseModel):
     code: str = "broker_result"
     message: str = ""
     observed_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class ExecutionAttempt(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    result: ExecutionResult
+    risk_decision: RiskDecision | None = None
+    reused_existing: bool = False
