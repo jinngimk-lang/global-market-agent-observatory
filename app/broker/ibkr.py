@@ -11,7 +11,11 @@ from app.domain.models import (
     ExternalAccountSnapshot,
     ObservedOrder,
     ObservedPosition,
+    OrderIntent,
+    OrderStatus,
+    OrderType,
 )
+from app.execution.models import ExecutionResult
 
 
 class IBKRObserver:
@@ -124,6 +128,397 @@ class IBKRObserver:
             if isinstance(value, dict) and value.get("currency"):
                 return str(value["currency"])
         return None
+
+    @staticmethod
+    def _decimal(value: Any) -> Decimal | None:
+        if value in (None, ""):
+            return None
+        return Decimal(str(value))
+
+
+class IBKRExecutionAdapter:
+    """Execution boundary for IBKR Client Portal / Trading Web API.
+
+    Client order identifiers are sent as cOID. Precautionary reply messages are
+    never auto-confirmed unless every returned messageId is explicitly allowlisted.
+    """
+
+    name = "ibkr"
+
+    def __init__(
+        self,
+        *,
+        account_id: str,
+        base_url: str = "https://localhost:5000/v1/api",
+        verify_ssl: bool = False,
+        auto_confirm_message_ids: set[str] | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        if not account_id:
+            raise ValueError("IBKR account_id is required for execution")
+        self._account_id = account_id
+        self._base_url = base_url.rstrip("/")
+        self._verify_ssl = verify_ssl
+        self._auto_confirm_message_ids = set(auto_confirm_message_ids or set())
+        self._client = client
+
+    async def get_order_by_client_id(self, client_order_id: str) -> ExecutionResult | None:
+        if self._client is not None:
+            return await self._lookup(self._client, client_order_id)
+        async with httpx.AsyncClient(
+            base_url=self._base_url,
+            verify=self._verify_ssl,
+            timeout=20,
+        ) as client:
+            return await self._lookup(client, client_order_id)
+
+    async def _lookup(
+        self,
+        client: httpx.AsyncClient,
+        client_order_id: str,
+    ) -> ExecutionResult | None:
+        try:
+            response = await client.get(
+                "/iserver/account/orders",
+                params={"force": "true", "accountId": self._account_id},
+            )
+        except httpx.TransportError as exc:
+            return ExecutionResult(
+                client_order_id=client_order_id,
+                status=OrderStatus.UNKNOWN,
+                code="ibkr_lookup_unknown",
+                message=str(exc),
+            )
+        if response.status_code >= 500:
+            return ExecutionResult(
+                client_order_id=client_order_id,
+                status=OrderStatus.UNKNOWN,
+                code="ibkr_lookup_unknown",
+                message=self._response_message(response),
+            )
+        if response.is_error:
+            return ExecutionResult(
+                client_order_id=client_order_id,
+                status=OrderStatus.REJECTED,
+                code=f"ibkr_lookup_http_{response.status_code}",
+                message=self._response_message(response),
+            )
+        payload = response.json() or {}
+        orders = payload.get("orders", []) if isinstance(payload, dict) else []
+        for item in orders:
+            candidate = (
+                item.get("order_ref")
+                or item.get("local_order_id")
+                or item.get("cOID")
+                or item.get("client_order_id")
+            )
+            if str(candidate or "") == client_order_id:
+                return self._map_execution_order(
+                    item,
+                    fallback_client_order_id=client_order_id,
+                )
+        return None
+
+    async def submit(self, intent: OrderIntent) -> ExecutionResult:
+        if intent.order_type is OrderType.LIMIT and intent.limit_price is None:
+            return ExecutionResult(
+                client_order_id=intent.client_order_id,
+                status=OrderStatus.REJECTED,
+                code="invalid_limit_order",
+                message="A limit order requires limit_price.",
+            )
+        if self._client is not None:
+            return await self._submit(self._client, intent)
+        async with httpx.AsyncClient(
+            base_url=self._base_url,
+            verify=self._verify_ssl,
+            timeout=20,
+        ) as client:
+            return await self._submit(client, intent)
+
+    async def _submit(
+        self,
+        client: httpx.AsyncClient,
+        intent: OrderIntent,
+    ) -> ExecutionResult:
+        conid_result = await self._resolve_stock_conid(client, intent.symbol)
+        if isinstance(conid_result, ExecutionResult):
+            return conid_result.model_copy(update={"client_order_id": intent.client_order_id})
+
+        order: dict[str, Any] = {
+            "acctId": self._account_id,
+            "cOID": intent.client_order_id,
+            "conid": conid_result,
+            "orderType": "LMT" if intent.order_type is OrderType.LIMIT else "MKT",
+            "side": intent.side.value.upper(),
+            "tif": "DAY",
+            "quantity": float(intent.quantity),
+        }
+        if intent.order_type is OrderType.LIMIT:
+            order["price"] = float(intent.limit_price)
+
+        try:
+            response = await client.post(
+                f"/iserver/account/{self._account_id}/orders",
+                json={"orders": [order]},
+            )
+        except httpx.TransportError as exc:
+            return ExecutionResult(
+                client_order_id=intent.client_order_id,
+                status=OrderStatus.UNKNOWN,
+                code="ibkr_submit_unknown",
+                message=str(exc),
+            )
+        if response.status_code >= 500:
+            return ExecutionResult(
+                client_order_id=intent.client_order_id,
+                status=OrderStatus.UNKNOWN,
+                code="ibkr_submit_unknown",
+                message=self._response_message(response),
+            )
+        if response.is_error:
+            return ExecutionResult(
+                client_order_id=intent.client_order_id,
+                status=OrderStatus.REJECTED,
+                code=f"ibkr_submit_http_{response.status_code}",
+                message=self._response_message(response),
+            )
+        return await self._handle_submission_payload(
+            client,
+            response.json(),
+            intent.client_order_id,
+        )
+
+    async def _resolve_stock_conid(
+        self,
+        client: httpx.AsyncClient,
+        symbol: str,
+    ) -> int | ExecutionResult:
+        try:
+            response = await client.post(
+                "/iserver/secdef/search",
+                json={"symbol": symbol, "secType": "STK", "name": False},
+            )
+        except httpx.TransportError as exc:
+            return ExecutionResult(
+                status=OrderStatus.REJECTED,
+                code="ibkr_contract_lookup_failed",
+                message=str(exc),
+            )
+        if response.is_error:
+            return ExecutionResult(
+                status=OrderStatus.REJECTED,
+                code="ibkr_contract_lookup_failed",
+                message=self._response_message(response),
+            )
+
+        payload = response.json() or []
+        matches: list[int] = []
+        if isinstance(payload, list):
+            for item in payload:
+                if str(item.get("symbol") or "").upper() != symbol.upper():
+                    continue
+                sections = item.get("sections") or []
+                if sections and not any(
+                    str(section.get("secType") or "").upper() == "STK"
+                    for section in sections
+                    if isinstance(section, dict)
+                ):
+                    continue
+                if item.get("conid") is not None:
+                    matches.append(int(item["conid"]))
+
+        unique_matches = set(matches)
+        if not unique_matches:
+            return ExecutionResult(
+                status=OrderStatus.REJECTED,
+                code="ibkr_contract_not_found",
+                message=f"No IBKR stock contract found for {symbol}.",
+            )
+        if len(unique_matches) > 1:
+            return ExecutionResult(
+                status=OrderStatus.REJECTED,
+                code="ibkr_contract_ambiguous",
+                message=f"Multiple IBKR stock contracts found for {symbol}.",
+            )
+        return next(iter(unique_matches))
+
+    async def _handle_submission_payload(
+        self,
+        client: httpx.AsyncClient,
+        payload: Any,
+        client_order_id: str,
+    ) -> ExecutionResult:
+        item = self._first_item(payload)
+        if item is None:
+            return ExecutionResult(
+                client_order_id=client_order_id,
+                status=OrderStatus.UNKNOWN,
+                code="ibkr_unrecognized_response",
+                message=str(payload),
+            )
+
+        if item.get("id") and item.get("message"):
+            message_ids = {str(value) for value in (item.get("messageIds") or [])}
+            if not message_ids or not message_ids.issubset(self._auto_confirm_message_ids):
+                return ExecutionResult(
+                    client_order_id=client_order_id,
+                    status=OrderStatus.REJECTED,
+                    code="ibkr_confirmation_required",
+                    message="; ".join(str(value) for value in (item.get("message") or [])),
+                )
+
+            reply_id = str(item["id"])
+            try:
+                response = await client.post(
+                    f"/iserver/reply/{reply_id}",
+                    json={"confirmed": True},
+                )
+            except httpx.TransportError as exc:
+                return ExecutionResult(
+                    client_order_id=client_order_id,
+                    status=OrderStatus.UNKNOWN,
+                    code="ibkr_confirmation_unknown",
+                    message=str(exc),
+                )
+            if response.status_code >= 500:
+                return ExecutionResult(
+                    client_order_id=client_order_id,
+                    status=OrderStatus.UNKNOWN,
+                    code="ibkr_confirmation_unknown",
+                    message=self._response_message(response),
+                )
+            if response.is_error:
+                return ExecutionResult(
+                    client_order_id=client_order_id,
+                    status=OrderStatus.REJECTED,
+                    code=f"ibkr_confirmation_http_{response.status_code}",
+                    message=self._response_message(response),
+                )
+            return await self._handle_submission_payload(
+                client,
+                response.json(),
+                client_order_id,
+            )
+
+        return self._map_execution_order(
+            item,
+            fallback_client_order_id=client_order_id,
+        )
+
+    async def cancel(self, broker_order_id: str) -> ExecutionResult:
+        if self._client is not None:
+            return await self._cancel(self._client, broker_order_id)
+        async with httpx.AsyncClient(
+            base_url=self._base_url,
+            verify=self._verify_ssl,
+            timeout=20,
+        ) as client:
+            return await self._cancel(client, broker_order_id)
+
+    async def _cancel(
+        self,
+        client: httpx.AsyncClient,
+        broker_order_id: str,
+    ) -> ExecutionResult:
+        try:
+            response = await client.delete(
+                f"/iserver/account/{self._account_id}/order/{broker_order_id}"
+            )
+        except httpx.TransportError as exc:
+            return ExecutionResult(
+                broker_order_id=broker_order_id,
+                status=OrderStatus.UNKNOWN,
+                code="ibkr_cancel_unknown",
+                message=str(exc),
+            )
+        if response.status_code >= 500:
+            return ExecutionResult(
+                broker_order_id=broker_order_id,
+                status=OrderStatus.UNKNOWN,
+                code="ibkr_cancel_unknown",
+                message=self._response_message(response),
+            )
+        if response.is_error:
+            return ExecutionResult(
+                broker_order_id=broker_order_id,
+                status=OrderStatus.REJECTED,
+                code=f"ibkr_cancel_http_{response.status_code}",
+                message=self._response_message(response),
+            )
+        payload = response.json() or {}
+        return ExecutionResult(
+            broker_order_id=str(payload.get("order_id") or broker_order_id),
+            status=OrderStatus.ACCEPTED,
+            code="cancel_requested",
+            message=str(payload.get("msg") or "IBKR accepted cancellation request."),
+            raw_status="cancel_requested",
+        )
+
+    @classmethod
+    def _map_execution_order(
+        cls,
+        item: dict[str, Any],
+        *,
+        fallback_client_order_id: str | None = None,
+    ) -> ExecutionResult:
+        raw_status = str(item.get("order_status") or item.get("status") or "unknown")
+        normalized = raw_status.lower().replace(" ", "")
+        if normalized == "filled":
+            status = OrderStatus.FILLED
+        elif normalized in {"cancelled", "canceled"}:
+            status = OrderStatus.CANCELLED
+        elif normalized in {"rejected", "inactive"}:
+            status = OrderStatus.REJECTED
+        elif normalized in {
+            "submitted",
+            "presubmitted",
+            "pendingsubmit",
+            "apipending",
+            "pendingcancel",
+        }:
+            status = OrderStatus.ACCEPTED
+        else:
+            status = OrderStatus.UNKNOWN
+
+        client_order_id = (
+            item.get("local_order_id")
+            or item.get("order_ref")
+            or item.get("cOID")
+            or fallback_client_order_id
+        )
+        broker_order_id = item.get("order_id") or item.get("orderId")
+        return ExecutionResult(
+            client_order_id=(str(client_order_id) if client_order_id is not None else None),
+            broker_order_id=(str(broker_order_id) if broker_order_id is not None else None),
+            status=status,
+            code="broker_result",
+            message=f"IBKR order status: {raw_status}",
+            filled_quantity=(
+                cls._decimal(item.get("filledQuantity") or item.get("filled_quantity"))
+                or Decimal("0")
+            ),
+            filled_price=cls._decimal(item.get("avgPrice") or item.get("avg_price")),
+            raw_status=raw_status,
+        )
+
+    @staticmethod
+    def _first_item(payload: Any) -> dict[str, Any] | None:
+        if isinstance(payload, dict):
+            return payload
+        if isinstance(payload, list) and payload and isinstance(payload[0], dict):
+            return payload[0]
+        return None
+
+    @staticmethod
+    def _response_message(response: httpx.Response) -> str:
+        try:
+            payload = response.json()
+        except ValueError:
+            return response.text
+        if isinstance(payload, dict):
+            return str(payload.get("error") or payload.get("message") or payload)
+        return str(payload)
 
     @staticmethod
     def _decimal(value: Any) -> Decimal | None:
