@@ -7,6 +7,19 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 
+class TradingMode(StrEnum):
+    REPLAY = "replay"
+    PAPER = "paper"
+    BROKER_PAPER = "broker-paper"
+    LIVE = "live"
+
+
+class TradingState(StrEnum):
+    ACTIVE = "active"
+    REDUCING = "reducing"
+    HALTED = "halted"
+
+
 class Side(StrEnum):
     BUY = "buy"
     SELL = "sell"
