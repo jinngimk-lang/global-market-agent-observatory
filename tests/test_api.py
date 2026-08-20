@@ -4,8 +4,10 @@ import time
 from decimal import Decimal
 
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from app.api.main import create_app
+from app.domain.models import ExecutionProvider, TradingMode
 from app.settings import Settings
 
 
@@ -53,7 +55,10 @@ def test_health_history_order_and_portfolio_flow(tmp_path) -> None:
     assert health.status_code == 200
     assert health.json()["status"] == "ok"
     assert health.json()["trading_mode"] == "paper"
-    assert health.json()["live_trading_enabled"] is False
+    assert health.json()["execution_provider"] == "paper"
+    assert health.json()["auto_trading_enabled"] is False
+    assert health.json()["live_execution_permitted"] is False
+    assert health.json()["trading_state"] == "active"
     assert candles[-1]["symbol"] == "BTCUSDT"
     assert order.status_code == 201
     assert order.json()["status"] == "filled"
@@ -80,6 +85,51 @@ def test_risk_rejection_is_structured_and_fail_closed(tmp_path) -> None:
 
     assert response.status_code == 403
     assert response.json()["detail"]["code"] == "order_notional_limit"
+
+
+def test_legacy_order_api_is_disabled_for_live_execution_provider(tmp_path) -> None:
+    settings = Settings(
+        database_path=str(tmp_path / "live-api.db"),
+        market_source="replay",
+        market_symbol="BTCUSDT",
+        trading_mode=TradingMode.LIVE,
+        execution_provider=ExecutionProvider.ALPACA,
+        live_trading_enabled=True,
+        live_trading_confirmation="I_UNDERSTAND_LIVE_TRADING",
+        alpaca_api_key=SecretStr("key"),
+        alpaca_api_secret=SecretStr("secret"),
+        alpaca_base_url="https://api.alpaca.markets",
+    )
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/orders",
+            json={
+                "client_order_id": "must-not-route-live",
+                "symbol": "BTCUSDT",
+                "side": "buy",
+                "quantity": "1",
+            },
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "legacy_order_api_disabled"
+
+
+def test_trading_status_is_read_only_and_exposes_no_credentials(tmp_path) -> None:
+    app = create_app(make_settings(tmp_path))
+
+    with TestClient(app) as client:
+        payload = client.get("/api/trading/status").json()
+
+    assert payload["trading_mode"] == "paper"
+    assert payload["execution_provider"] == "paper"
+    assert payload["trading_state"] == "active"
+    assert payload["auto_trading_enabled"] is False
+    assert payload["trading_universe"] == ["KLAC", "NVDA", "SPCX"]
+    assert "alpaca_api_key" not in payload
+    assert "ibkr_account_id" not in payload
 
 
 def test_market_websocket_streams_normalized_candles(tmp_path) -> None:
@@ -130,7 +180,7 @@ def test_external_account_observers_are_exposed_read_only(tmp_path) -> None:
             time.sleep(0.02)
 
     assert payload is not None
-    assert payload["live_execution_enabled"] is False
+    assert payload["live_execution_permitted"] is False
     assert payload["accounts"][0]["name"] == "fake-broker"
     assert payload["accounts"][0]["snapshot"]["equity"] == "12345"
     assert payload["accounts"][0]["snapshot"]["orders"][0]["order_id"] == "external-1"
