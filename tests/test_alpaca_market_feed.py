@@ -67,7 +67,7 @@ async def test_alpaca_stock_stream_authenticates_subscribes_and_normalizes_bar()
 
 
 @pytest.mark.asyncio
-async def test_updated_bar_is_normalized_for_same_minute_upsert() -> None:
+async def test_updated_bar_is_marked_as_market_revision_for_safe_upsert() -> None:
     websocket = FakeWebSocket(
         [
             '[{"T":"success","msg":"connected"}]',
@@ -87,6 +87,7 @@ async def test_updated_bar_is_normalized_for_same_minute_upsert() -> None:
 
     assert bars[0].open_time.isoformat() == "2026-08-20T13:40:00+00:00"
     assert bars[0].close == 202
+    assert bars[0].source == "alpaca:iex:updated"
 
 
 @pytest.mark.asyncio
