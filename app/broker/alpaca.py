@@ -62,15 +62,27 @@ class AlpacaObserver:
         positions = [self._map_position(item) for item in positions_response.json()]
         orders = [self._map_order(item) for item in orders_response.json()]
         mode = "paper-read-only" if "paper" in self._base_url else "live-read-only"
+        equity = self._decimal(account.get("equity"))
+        prior_equity = self._decimal(account.get("last_equity"))
+        daily_pnl = (
+            equity - prior_equity
+            if equity is not None and prior_equity is not None
+            else None
+        )
         return ExternalAccountSnapshot(
             provider="alpaca",
             account_id=str(account.get("id") or "unknown"),
             mode=mode,
             status=str(account.get("status") or "unknown").lower(),
             base_currency=str(account.get("currency") or "USD"),
-            equity=self._decimal(account.get("equity")),
+            equity=equity,
+            prior_equity=prior_equity,
+            daily_pnl=daily_pnl,
             cash=self._decimal(account.get("cash")),
             buying_power=self._decimal(account.get("buying_power")),
+            trading_blocked=account.get("trading_blocked"),
+            account_blocked=account.get("account_blocked"),
+            trade_suspended_by_user=account.get("trade_suspended_by_user"),
             positions=positions,
             orders=orders,
         )
