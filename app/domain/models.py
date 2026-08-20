@@ -34,6 +34,7 @@ class OrderStatus(StrEnum):
     ACCEPTED = "accepted"
     FILLED = "filled"
     REJECTED = "rejected"
+    UNKNOWN = "unknown"
 
 
 class AuditEventType(StrEnum):
