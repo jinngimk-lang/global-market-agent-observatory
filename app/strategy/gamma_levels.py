@@ -59,6 +59,7 @@ class GammaLevelsStrategy:
                 rationale_codes=["call_wall_breakout", "positive_order_flow"],
                 entry_price=market.current_price,
                 invalidation_price=call_wall,
+                generated_at=market.observed_at,
             )
 
         if (
@@ -75,6 +76,7 @@ class GammaLevelsStrategy:
                 rationale_codes=["put_wall_breakdown", "negative_order_flow"],
                 entry_price=market.current_price,
                 invalidation_price=put_wall,
+                generated_at=market.observed_at,
             )
 
         if (
@@ -92,6 +94,7 @@ class GammaLevelsStrategy:
                 rationale_codes=["put_wall_support", "positive_order_flow"],
                 entry_price=market.current_price,
                 invalidation_price=put_wall * (Decimal("1") - self._breakout_fraction),
+                generated_at=market.observed_at,
             )
 
         if (
@@ -109,6 +112,7 @@ class GammaLevelsStrategy:
                 rationale_codes=["call_wall_rejection", "negative_order_flow"],
                 entry_price=market.current_price,
                 invalidation_price=call_wall,
+                generated_at=market.observed_at,
             )
 
         return hold_signal(
