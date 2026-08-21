@@ -6,7 +6,13 @@ from decimal import Decimal
 import pytest
 
 from app.domain.models import Candle, Side
-from app.market.features import TradePrint, anchored_vwap, order_flow_imbalance, volume_profile, vwap
+from app.market.features import (
+    TradePrint,
+    anchored_vwap,
+    order_flow_imbalance,
+    volume_profile,
+    vwap,
+)
 from app.market.options import (
     GEXAssumptions,
     OptionOpenInterestPoint,
