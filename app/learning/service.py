@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app.domain.models import Candle, TradingMode
@@ -74,11 +74,7 @@ class StrategyLearningService:
             closed_only=True,
         )
         recent = observations[-self._policy.window_observations :]
-        returns = [
-            item.net_return
-            for item in recent
-            if item.net_return is not None
-        ]
+        returns = [item.net_return for item in recent if item.net_return is not None]
         closed_observations = len(returns)
         expectancy = (
             sum(returns, Decimal("0")) / Decimal(closed_observations)
@@ -94,7 +90,10 @@ class StrategyLearningService:
 
         reasons: list[str] = []
         if closed_observations >= self._policy.min_observations:
-            if expectancy is not None and expectancy <= self._policy.min_expectancy_after_costs:
+            if (
+                expectancy is not None
+                and expectancy <= self._policy.min_expectancy_after_costs
+            ):
                 reasons.append("negative_expectancy")
             if max_drawdown is not None and max_drawdown > self._policy.max_drawdown:
                 reasons.append("drawdown_limit")
@@ -156,7 +155,7 @@ class StrategyLearningService:
     def _close_observation(
         observation: StrategyObservation,
         exit_price: Decimal,
-        closed_at,
+        closed_at: datetime,
     ) -> StrategyObservation:
         gross_return = (
             (exit_price - observation.entry_price) / observation.entry_price
@@ -189,30 +188,68 @@ class StrategyLearningService:
         return min(max_drawdown, Decimal("1"))
 
     @staticmethod
-    def _now_from_observations(observations: list[StrategyObservation]):
+    def _now_from_observations(observations: list[StrategyObservation]) -> datetime:
         closed_times = [item.closed_at for item in observations if item.closed_at is not None]
         if closed_times:
             return max(closed_times)
-        return __import__("datetime").datetime.now(UTC)
+        return datetime.now(UTC)
 
     def _sync_promotion_evidence(self, health: StrategyHealth) -> None:
         counts = self._store.count_closed_by_mode(health.strategy_id, health.version)
-        existing = self._evidence_store.get(health.strategy_id, health.version) or PromotionEvidence()
-        reference = (
-            f"runtime-learning:{health.strategy_id}@{health.version}:"
-            f"{health.closed_observations}"
+        existing = (
+            self._evidence_store.get(health.strategy_id, health.version)
+            or PromotionEvidence()
         )
+        runtime_replay = counts.get(TradingMode.REPLAY, 0)
+        runtime_paper = counts.get(TradingMode.PAPER, 0)
+        runtime_broker_paper = counts.get(TradingMode.BROKER_PAPER, 0)
+        runtime_total = runtime_replay + runtime_paper + runtime_broker_paper
+        existing_total = (
+            existing.replay_observations
+            + existing.paper_observations
+            + existing.broker_paper_observations
+        )
+
         refs = list(existing.evidence_refs)
-        if reference not in refs:
-            refs.append(reference)
+        if health.closed_observations > 0:
+            reference = (
+                f"runtime-learning:{health.strategy_id}@{health.version}:"
+                f"{health.closed_observations}"
+            )
+            if reference not in refs:
+                refs.append(reference)
+
+        # Runtime forward observations are supplemental evidence. They must
+        # never erase stronger replay/walk-forward evidence already persisted.
+        preserve_existing_metrics = (
+            existing.out_of_sample_verified
+            or existing_total > runtime_total
+        )
+        expectancy = (
+            existing.expectancy_after_costs
+            if preserve_existing_metrics and existing.expectancy_after_costs is not None
+            else health.expectancy_after_costs
+        )
+        max_drawdown = (
+            existing.max_drawdown
+            if preserve_existing_metrics and existing.max_drawdown is not None
+            else health.max_drawdown
+        )
+
         updated = existing.model_copy(
             update={
-                "replay_observations": counts.get(TradingMode.REPLAY, 0),
-                "paper_observations": counts.get(TradingMode.PAPER, 0),
-                "broker_paper_observations": counts.get(TradingMode.BROKER_PAPER, 0),
-                "transaction_cost_model_documented": True,
-                "expectancy_after_costs": health.expectancy_after_costs,
-                "max_drawdown": health.max_drawdown,
+                "replay_observations": max(existing.replay_observations, runtime_replay),
+                "paper_observations": max(existing.paper_observations, runtime_paper),
+                "broker_paper_observations": max(
+                    existing.broker_paper_observations,
+                    runtime_broker_paper,
+                ),
+                "transaction_cost_model_documented": (
+                    existing.transaction_cost_model_documented
+                    or health.closed_observations > 0
+                ),
+                "expectancy_after_costs": expectancy,
+                "max_drawdown": max_drawdown,
                 "degradation_rule_defined": True,
                 "evidence_refs": refs,
             }
