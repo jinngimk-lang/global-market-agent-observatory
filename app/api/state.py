@@ -30,6 +30,7 @@ from app.trading.portfolio_source import (
     LocalPaperPortfolioSource,
     PortfolioSource,
 )
+from app.trading.state_store import SQLiteTradingStateStore
 
 
 class ApplicationState:
@@ -64,13 +65,17 @@ class ApplicationState:
         )
         self.audit = AuditService(self.store)
         self.execution_adapter = build_execution_adapter(settings, self.store)
+        self.trading_state_store = SQLiteTradingStateStore(settings.database_path)
+        persisted_trading_state = self.trading_state_store.get()
         self.execution = ExecutionController(
             adapter=self.execution_adapter,
             risk_engine=self.risk,
+            trading_state=persisted_trading_state,
         )
         self.orchestrator = TradingOrchestrator(
             execution=self.execution,
             audit=self.audit,
+            state_store=self.trading_state_store,
         )
         self.allocator = PortfolioAllocator(
             PortfolioPolicy(
