@@ -7,11 +7,14 @@ from pathlib import Path
 from app.domain.models import TradingState
 
 
-class TradingStateStore:
-    """Persist fail-closed runtime state across process restarts."""
+class SQLiteTradingStateStore:
+    """Persist fail-closed runtime state independently of process lifetime."""
+
+    _KEY = "trading_state"
 
     def __init__(self, database_path: str | Path) -> None:
         self._path = str(database_path)
+        Path(self._path).parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
@@ -43,23 +46,45 @@ class TradingStateStore:
                     datetime.now(UTC).isoformat(),
                 ),
             )
+            connection.commit()
 
-    def get(self) -> tuple[TradingState, str | None]:
+    def get(self) -> TradingState:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT state, reason FROM trading_runtime_state WHERE id = 1"
+                "SELECT state FROM trading_runtime_state WHERE id = 1"
             ).fetchone()
         if row is None:
-            raise RuntimeError("Trading runtime state is not initialized")
-        return TradingState(row["state"]), row["reason"]
+            return TradingState.HALTED
+        try:
+            return TradingState(str(row["state"]))
+        except ValueError:
+            # Corrupt/unknown persisted state must never silently unlock execution.
+            return TradingState.HALTED
+
+    def last_reason(self) -> str | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT reason FROM trading_runtime_state WHERE id = 1"
+            ).fetchone()
+        if row is None or row["reason"] is None:
+            return None
+        return str(row["reason"])
 
     def set(self, state: TradingState, *, reason: str | None = None) -> None:
         with self._connect() as connection:
             connection.execute(
                 """
-                UPDATE trading_runtime_state
-                SET state = ?, reason = ?, updated_at = ?
-                WHERE id = 1
+                INSERT INTO trading_runtime_state(id, state, reason, updated_at)
+                VALUES(1, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    state=excluded.state,
+                    reason=excluded.reason,
+                    updated_at=excluded.updated_at
                 """,
                 (state.value, reason, datetime.now(UTC).isoformat()),
             )
+            connection.commit()
+
+
+# Compatibility alias for earlier work on this branch.
+TradingStateStore = SQLiteTradingStateStore
