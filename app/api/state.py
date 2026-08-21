@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from app.audit.service import AuditService
@@ -16,8 +17,10 @@ from app.learning.models import StrategyHealth, StrategyHealthPolicy
 from app.learning.service import StrategyLearningService
 from app.learning.store import SQLiteStrategyLearningStore
 from app.market.alpaca import AlpacaStockBarFeed
+from app.market.alpaca_options import AlpacaOptionsChainClient
 from app.market.binance import BinanceKlineFeed
 from app.market.hub import MarketHub
+from app.market.options_structure import OptionsChainSource, OptionsStructureService
 from app.market.replay import ReplayFeed
 from app.portfolio.engine import PortfolioAllocator, PortfolioPolicy
 from app.risk.engine import RiskEngine
@@ -42,6 +45,7 @@ class ApplicationState:
         settings: Settings,
         *,
         observers: list[AccountObserver] | None = None,
+        options_chain_source: OptionsChainSource | None = None,
     ) -> None:
         self.settings = settings
         self.store = SQLiteStore(
@@ -146,6 +150,32 @@ class ApplicationState:
         )
 
         self.feed = self._build_market_feed()
+        self._owns_options_chain_source = False
+        selected_options_source = options_chain_source
+        if (
+            selected_options_source is None
+            and settings.options_structure_enabled
+            and settings.alpaca_api_key
+            and settings.alpaca_api_secret
+        ):
+            selected_options_source = AlpacaOptionsChainClient(
+                api_key=settings.alpaca_api_key.get_secret_value(),
+                api_secret=settings.alpaca_api_secret.get_secret_value(),
+                feed=settings.alpaca_options_feed,
+            )
+            self._owns_options_chain_source = True
+        self.options_chain_source = selected_options_source
+        self.options_structure = (
+            OptionsStructureService(
+                source=selected_options_source,
+                expiration_horizon_days=settings.options_expiration_horizon_days,
+                max_age_seconds=settings.options_structure_max_age_seconds,
+            )
+            if settings.options_structure_enabled and selected_options_source is not None
+            else None
+        )
+        self.options_structure_errors: dict[str, str] = {}
+
         self.account_snapshots: dict[str, ExternalAccountSnapshot] = {}
         self.account_errors: dict[str, str] = {}
         self.last_cycle_results: dict[str, TradingCycleResult] = {}
@@ -153,6 +183,7 @@ class ApplicationState:
         self._feed_task: asyncio.Task[None] | None = None
         self._account_task: asyncio.Task[None] | None = None
         self._improvement_task: asyncio.Task[None] | None = None
+        self._options_structure_task: asyncio.Task[None] | None = None
 
     @property
     def trading_state(self) -> TradingState:
@@ -219,11 +250,21 @@ class ApplicationState:
                 self._run_continuous_improvement(),
                 name="continuous-improvement",
             )
+        if self.options_structure is not None and self._options_structure_task is None:
+            self._options_structure_task = asyncio.create_task(
+                self._run_options_structure(),
+                name="options-structure",
+            )
 
     async def stop(self) -> None:
         tasks = [
             task
-            for task in (self._feed_task, self._account_task, self._improvement_task)
+            for task in (
+                self._feed_task,
+                self._account_task,
+                self._improvement_task,
+                self._options_structure_task,
+            )
             if task is not None
         ]
         for task in tasks:
@@ -236,10 +277,20 @@ class ApplicationState:
         self._feed_task = None
         self._account_task = None
         self._improvement_task = None
+        self._options_structure_task = None
+        if self._owns_options_chain_source and self.options_chain_source is not None:
+            close = getattr(self.options_chain_source, "close", None)
+            if close is not None:
+                await close()
 
     async def process_candle(self, candle) -> TradingCycleResult:
         self.store.mark_position(candle.symbol, Decimal(str(candle.close)))
-        cycle = await self.autonomous.on_candle(candle)
+        structure = (
+            self.options_structure.structure_for(candle.symbol, candle.close_time)
+            if self.options_structure is not None
+            else None
+        )
+        cycle = await self.autonomous.on_candle(candle, structure=structure)
         if (
             self.settings.strategy_learning_enabled
             and cycle.skipped_reason != "market_revision"
@@ -265,6 +316,42 @@ class ApplicationState:
                 ):
                     self.orchestrator.halt(f"autonomous_cycle_error: {message}")
             await self.hub.publish(candle)
+
+    async def refresh_options_structure_once(
+        self,
+        *,
+        observed_at: datetime | None = None,
+    ) -> None:
+        if self.options_structure is None:
+            return
+        observed = observed_at or datetime.now(UTC)
+        if observed.tzinfo is None:
+            observed = observed.replace(tzinfo=UTC)
+        observed = observed.astimezone(UTC)
+        for symbol in sorted(self.settings.trading_universe):
+            latest = self.store.latest_candle(
+                symbol,
+                interval=self.settings.market_interval,
+            )
+            if latest is None:
+                continue
+            try:
+                await self.options_structure.refresh(
+                    symbol,
+                    Decimal(str(latest.close)),
+                    observed_at=observed,
+                )
+                self.options_structure_errors.pop(symbol, None)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.options_structure.invalidate(symbol)
+                self.options_structure_errors[symbol] = f"{type(exc).__name__}: {exc}"
+
+    async def _run_options_structure(self) -> None:
+        while True:
+            await self.refresh_options_structure_once()
+            await asyncio.sleep(self.settings.options_structure_refresh_seconds)
 
     def refresh_continuous_improvement(self) -> list[StrategyHealth]:
         if not self.settings.strategy_learning_enabled:
