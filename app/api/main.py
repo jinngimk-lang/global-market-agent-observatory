@@ -126,6 +126,9 @@ def create_app(
             cycle_error_count=len(runtime.last_cycle_errors),
         )
 
+    def task_running(task) -> bool:
+        return task is not None and not task.done()
+
     @app.get("/api/trading/status")
     async def trading_status() -> dict:
         return {
@@ -151,6 +154,35 @@ def create_app(
                     item.model_dump(mode="json")
                     for item in runtime.strategy_health_reports
                 ],
+            },
+            "runtime_loops": {
+                "market_feed": {
+                    "running": task_running(runtime._feed_task),
+                    "failure_count": runtime.market_feed_failure_count,
+                    "last_error": runtime.last_market_feed_error,
+                    "retry_seconds": resolved_settings.market_feed_retry_seconds,
+                    "retry_max_seconds": resolved_settings.market_feed_retry_max_seconds,
+                },
+                "continuous_improvement": {
+                    "enabled": resolved_settings.strategy_learning_enabled,
+                    "running": task_running(runtime._improvement_task),
+                    "last_error": runtime.last_improvement_error,
+                },
+                "options_structure": {
+                    "enabled": resolved_settings.options_structure_enabled,
+                    "configured": runtime.options_structure is not None,
+                    "running": task_running(runtime._options_structure_task),
+                    "failure_count": runtime.options_structure_loop_failure_count,
+                    "last_error": runtime.last_options_structure_loop_error,
+                    "symbol_errors": dict(sorted(runtime.options_structure_errors.items())),
+                    "refresh_seconds": resolved_settings.options_structure_refresh_seconds,
+                    "max_age_seconds": resolved_settings.options_structure_max_age_seconds,
+                },
+                "account_observers": {
+                    "configured": len(runtime.observers),
+                    "running": task_running(runtime._account_task),
+                    "errors": dict(sorted(runtime.account_errors.items())),
+                },
             },
             "live_execution_permitted": resolved_settings.live_execution_permitted,
             "trading_state": runtime.trading_state.value,
