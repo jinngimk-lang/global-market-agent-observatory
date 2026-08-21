@@ -58,6 +58,7 @@ A second independent gate now exists: **broker execution capability does not imp
 - Added reconciliation-before-retry behavior for uncertain broker outcomes.
 - Unknown execution state causes fail-closed HALT.
 - Added persistent trading-state storage: HALT/REDUCING/ACTIVE survive process restart; corrupt/unknown persisted state fails closed to HALTED.
+- Added persistent completed-cycle checkpoints so the same finished market observation is skipped after replay or process restart; UNKNOWN execution outcomes are intentionally not checkpointed.
 - Added append-only audit events for signals, risk decisions, execution, reconciliation, system state, and kill-switch transitions.
 
 ### Market data and market structure
@@ -108,7 +109,7 @@ A second independent gate now exists: **broker execution capability does not imp
 - Added an autonomous market-cycle engine that processes bars through strategy -> allocation -> risk -> execution -> audit.
 - Monitoring mode can generate signals without sending orders.
 - Market-data revisions are stored but do not trigger duplicate execution.
-- Added deterministic cycle identity/checkpoint work to prevent replay/restart duplicate processing.
+- Completed market cycles have persistent identities/checkpoints to prevent replay/restart duplicate processing.
 - Main `ApplicationState` now builds the unified execution/orchestration/promotion architecture.
 - Legacy unauthenticated `/api/orders` remains local-paper-only and must never become a live broker write path.
 
@@ -154,24 +155,29 @@ Project translation:
 
 Draft PR `#8` is active.
 
-Latest completed diagnostic CI exposed only two Ruff issues before pytest could run:
+CI run `#196` for code head `f68c8b4e3f9e6268a6aac145d634cde7bb5ed8dd` completed successfully on 2026-08-21.
 
-- import formatting in `tests/test_market_intelligence.py`;
-- an unused `timedelta` import in `tests/test_reconciliation.py`.
+Verified green:
 
-Both have been fixed on the branch. A fresh CI run is queued/running. Container build had already succeeded on the prior run. Do not mark the PR merge-ready until Ruff, pytest on Python 3.12/3.13, compile checks, skill check, and container build are all green on the current head.
+- Ruff static checks;
+- full pytest suite: **169 passed** on Python 3.12;
+- full pytest suite: **169 passed** on Python 3.13;
+- `compileall` on application code;
+- required engineering skill file check;
+- Docker container build.
+
+This `STATUS.md` update is documentation-only after that verified code head. Keep PR #8 draft because product evidence/promotion work is intentionally incomplete, not because the current code fails CI.
 
 ## Immediate next steps
 
-1. Finish current CI loop; inspect and fix any pytest/static failures on the current head.
-2. Integrate real options OI/Greeks data with provenance for GEX/call-wall/put-wall features.
-3. Add replay/backtest evidence collection with transaction costs and out-of-sample metrics.
-4. Feed those metrics into `PromotionEvidence` instead of manually asserting promotion.
-5. Add strategy degradation/automatic-disable evidence and policies.
-6. Add authenticated operator controls for kill-switch/reactivation; unauthenticated write paths remain non-live.
-7. Integrate dark-pool/off-exchange evidence only after source/methodology/latency are explicit.
-8. Promote strategies only through replay -> paper -> broker-paper -> live based on recorded evidence.
-9. Keep PR #8 draft until full verification and review are complete.
+1. Integrate real options OI/Greeks data with provenance for GEX/call-wall/put-wall features.
+2. Add replay/backtest evidence collection with transaction costs and out-of-sample metrics.
+3. Feed those metrics into `PromotionEvidence` instead of manually asserting promotion.
+4. Add strategy degradation/automatic-disable evidence and policies.
+5. Add authenticated operator controls for kill-switch/reactivation; unauthenticated write paths remain non-live.
+6. Integrate dark-pool/off-exchange evidence only after source/methodology/latency are explicit.
+7. Promote strategies only through replay -> paper -> broker-paper -> live based on recorded evidence.
+8. Keep PR #8 draft until evidence, review, and operational readiness justify merge/readiness.
 
 ## Known blockers / intentionally unfinished work
 
