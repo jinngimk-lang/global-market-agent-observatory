@@ -182,6 +182,8 @@ class ApplicationState:
         self.account_errors: dict[str, str] = {}
         self.last_cycle_results: dict[str, TradingCycleResult] = {}
         self.last_cycle_errors: dict[str, str] = {}
+        self.last_market_feed_error: str | None = None
+        self.market_feed_failure_count = 0
         self._feed_task: asyncio.Task[None] | None = None
         self._account_task: asyncio.Task[None] | None = None
         self._improvement_task: asyncio.Task[None] | None = None
@@ -302,22 +304,43 @@ class ApplicationState:
         return cycle
 
     async def _run_feed(self) -> None:
-        async for candle in self.feed.stream():
+        retry_seconds = min(
+            self.settings.market_feed_retry_seconds,
+            self.settings.market_feed_retry_max_seconds,
+        )
+        while True:
             try:
-                cycle = await self.process_candle(candle)
-                self.last_cycle_results[candle.symbol] = cycle
-                self.last_cycle_errors.pop(candle.symbol, None)
+                async for candle in self.feed.stream():
+                    retry_seconds = min(
+                        self.settings.market_feed_retry_seconds,
+                        self.settings.market_feed_retry_max_seconds,
+                    )
+                    try:
+                        cycle = await self.process_candle(candle)
+                        self.last_cycle_results[candle.symbol] = cycle
+                        self.last_cycle_errors.pop(candle.symbol, None)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        message = f"{type(exc).__name__}: {exc}"
+                        self.last_cycle_errors[candle.symbol] = message
+                        if (
+                            self.autonomous_execution_enabled
+                            and self.trading_state is not TradingState.HALTED
+                        ):
+                            self.orchestrator.halt(f"autonomous_cycle_error: {message}")
+                    await self.hub.publish(candle)
+                return
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                message = f"{type(exc).__name__}: {exc}"
-                self.last_cycle_errors[candle.symbol] = message
-                if (
-                    self.autonomous_execution_enabled
-                    and self.trading_state is not TradingState.HALTED
-                ):
-                    self.orchestrator.halt(f"autonomous_cycle_error: {message}")
-            await self.hub.publish(candle)
+                self.market_feed_failure_count += 1
+                self.last_market_feed_error = f"{type(exc).__name__}: {exc}"
+                await asyncio.sleep(retry_seconds)
+                retry_seconds = min(
+                    self.settings.market_feed_retry_max_seconds,
+                    retry_seconds * 2,
+                )
 
     async def refresh_options_structure_once(
         self,
