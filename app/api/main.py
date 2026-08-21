@@ -43,6 +43,10 @@ class HealthResponse(BaseModel):
     promotion_execution_allowed: bool
     autonomous_execution_enabled: bool
     strategy_promotion_blocked: int
+    strategy_learning_enabled: bool
+    strategy_health_execution_allowed: bool
+    strategy_degraded: int
+    continuous_improvement_error: str | None
     live_execution_permitted: bool
     trading_state: str
     market_source: str
@@ -98,6 +102,7 @@ def create_app(
     @app.get("/api/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
         blocked = sum(1 for item in runtime.strategy_promotion_reports if not item.allowed)
+        degraded = sum(1 for item in runtime.strategy_health_reports if item.degraded)
         return HealthResponse(
             status="ok" if runtime.trading_state.value != "halted" else "halted",
             trading_mode=resolved_settings.trading_mode.value,
@@ -106,6 +111,12 @@ def create_app(
             promotion_execution_allowed=runtime.promotion_execution_allowed,
             autonomous_execution_enabled=runtime.autonomous_execution_enabled,
             strategy_promotion_blocked=blocked,
+            strategy_learning_enabled=resolved_settings.strategy_learning_enabled,
+            strategy_health_execution_allowed=(
+                runtime.strategy_health_execution_allowed
+            ),
+            strategy_degraded=degraded,
+            continuous_improvement_error=runtime.last_improvement_error,
             live_execution_permitted=resolved_settings.live_execution_permitted,
             trading_state=runtime.trading_state.value,
             market_source=resolved_settings.market_source,
@@ -127,6 +138,20 @@ def create_app(
                 item.model_dump(mode="json")
                 for item in runtime.strategy_promotion_reports
             ],
+            "continuous_improvement": {
+                "enabled": resolved_settings.strategy_learning_enabled,
+                "interval_seconds": (
+                    resolved_settings.strategy_improvement_interval_seconds
+                ),
+                "health_execution_allowed": (
+                    runtime.strategy_health_execution_allowed
+                ),
+                "last_error": runtime.last_improvement_error,
+                "strategy_health": [
+                    item.model_dump(mode="json")
+                    for item in runtime.strategy_health_reports
+                ],
+            },
             "live_execution_permitted": resolved_settings.live_execution_permitted,
             "trading_state": runtime.trading_state.value,
             "market_source": resolved_settings.market_source,
