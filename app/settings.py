@@ -46,6 +46,19 @@ class Settings(BaseModel):
     max_portfolio_drawdown: Decimal = Decimal("5000")
     market_data_max_age_seconds: float = 5.0
     account_state_max_age_seconds: float = 30.0
+
+    # Continuous strategy evidence and degradation monitoring. This loop may
+    # reduce/disable risk, but it never mutates strategy code/parameters or
+    # promotes a strategy stage automatically.
+    strategy_learning_enabled: bool = True
+    strategy_improvement_interval_seconds: float = 30.0
+    strategy_evaluation_horizon_seconds: float = 300.0
+    strategy_transaction_cost_bps: Decimal = Decimal("10")
+    strategy_degradation_min_observations: int = 30
+    strategy_degradation_window_observations: int = 50
+    strategy_degradation_min_expectancy_after_costs: Decimal = Decimal("0")
+    strategy_degradation_max_drawdown: Decimal = Decimal("0.10")
+
     live_trading_enabled: bool = False
     live_trading_confirmation: str | None = None
     account_poll_seconds: float = 15.0
@@ -108,10 +121,52 @@ class Settings(BaseModel):
             raise ValueError("MAX_GROUP_EXPOSURE must be positive")
         return value
 
+    @field_validator(
+        "strategy_improvement_interval_seconds",
+        "strategy_evaluation_horizon_seconds",
+    )
+    @classmethod
+    def validate_positive_learning_seconds(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("strategy learning intervals must be positive")
+        return value
+
+    @field_validator("strategy_transaction_cost_bps")
+    @classmethod
+    def validate_strategy_costs(cls, value: Decimal) -> Decimal:
+        if value < 0:
+            raise ValueError("STRATEGY_TRANSACTION_COST_BPS must be non-negative")
+        return value
+
+    @field_validator(
+        "strategy_degradation_min_observations",
+        "strategy_degradation_window_observations",
+    )
+    @classmethod
+    def validate_strategy_observation_counts(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("strategy degradation observation counts must be positive")
+        return value
+
+    @field_validator("strategy_degradation_max_drawdown")
+    @classmethod
+    def validate_strategy_degradation_drawdown(cls, value: Decimal) -> Decimal:
+        if value <= 0 or value > 1:
+            raise ValueError("STRATEGY_DEGRADATION_MAX_DRAWDOWN must be in (0, 1]")
+        return value
+
     @model_validator(mode="after")
     def validate_runtime_safety(self) -> Settings:
         if self.auto_trading_enabled and not self.trading_universe:
             raise ValueError("AUTO_TRADING_ENABLED requires a non-empty TRADING_UNIVERSE")
+        if (
+            self.strategy_degradation_window_observations
+            < self.strategy_degradation_min_observations
+        ):
+            raise ValueError(
+                "STRATEGY_DEGRADATION_WINDOW_OBSERVATIONS must be >= "
+                "STRATEGY_DEGRADATION_MIN_OBSERVATIONS"
+            )
         if self.trading_mode is not TradingMode.LIVE:
             return self
         if not self.live_trading_enabled:
@@ -202,6 +257,29 @@ class Settings(BaseModel):
             max_portfolio_drawdown=Decimal(os.getenv("MAX_PORTFOLIO_DRAWDOWN", "5000")),
             market_data_max_age_seconds=float(os.getenv("MARKET_DATA_MAX_AGE_SECONDS", "5")),
             account_state_max_age_seconds=float(os.getenv("ACCOUNT_STATE_MAX_AGE_SECONDS", "30")),
+            strategy_learning_enabled=os.getenv("STRATEGY_LEARNING_ENABLED", "true").lower()
+            in {"1", "true", "yes"},
+            strategy_improvement_interval_seconds=float(
+                os.getenv("STRATEGY_IMPROVEMENT_INTERVAL_SECONDS", "30")
+            ),
+            strategy_evaluation_horizon_seconds=float(
+                os.getenv("STRATEGY_EVALUATION_HORIZON_SECONDS", "300")
+            ),
+            strategy_transaction_cost_bps=Decimal(
+                os.getenv("STRATEGY_TRANSACTION_COST_BPS", "10")
+            ),
+            strategy_degradation_min_observations=int(
+                os.getenv("STRATEGY_DEGRADATION_MIN_OBSERVATIONS", "30")
+            ),
+            strategy_degradation_window_observations=int(
+                os.getenv("STRATEGY_DEGRADATION_WINDOW_OBSERVATIONS", "50")
+            ),
+            strategy_degradation_min_expectancy_after_costs=Decimal(
+                os.getenv("STRATEGY_DEGRADATION_MIN_EXPECTANCY_AFTER_COSTS", "0")
+            ),
+            strategy_degradation_max_drawdown=Decimal(
+                os.getenv("STRATEGY_DEGRADATION_MAX_DRAWDOWN", "0.10")
+            ),
             live_trading_enabled=os.getenv("LIVE_TRADING_ENABLED", "false").lower()
             in {"1", "true", "yes"},
             live_trading_confirmation=os.getenv("LIVE_TRADING_CONFIRMATION") or None,
@@ -219,19 +297,26 @@ class Settings(BaseModel):
             alpaca_base_url=os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets"),
             ccxt_exchange_id=os.getenv("CCXT_EXCHANGE_ID") or None,
             ccxt_api_key=(
-                SecretStr(os.environ["CCXT_API_KEY"]) if os.getenv("CCXT_API_KEY") else None
+                SecretStr(os.environ["CCXT_API_KEY"])
+                if os.getenv("CCXT_API_KEY")
+                else None
             ),
-            ccxt_secret=SecretStr(os.environ["CCXT_SECRET"]) if os.getenv("CCXT_SECRET") else None,
+            ccxt_secret=SecretStr(os.environ["CCXT_SECRET"])
+            if os.getenv("CCXT_SECRET")
+            else None,
             ccxt_password=(
                 SecretStr(os.environ["CCXT_PASSWORD"])
                 if os.getenv("CCXT_PASSWORD")
                 else None
             ),
-            ccxt_sandbox=os.getenv("CCXT_SANDBOX", "true").lower() in {"1", "true", "yes"},
-            ibkr_enabled=os.getenv("IBKR_ENABLED", "false").lower() in {"1", "true", "yes"},
+            ccxt_sandbox=os.getenv("CCXT_SANDBOX", "true").lower()
+            in {"1", "true", "yes"},
+            ibkr_enabled=os.getenv("IBKR_ENABLED", "false").lower()
+            in {"1", "true", "yes"},
             ibkr_account_id=os.getenv("IBKR_ACCOUNT_ID") or None,
             ibkr_base_url=os.getenv("IBKR_BASE_URL", "https://localhost:5000/v1/api"),
-            ibkr_verify_ssl=os.getenv("IBKR_VERIFY_SSL", "false").lower() in {"1", "true", "yes"},
+            ibkr_verify_ssl=os.getenv("IBKR_VERIFY_SSL", "false").lower()
+            in {"1", "true", "yes"},
             ibkr_paper=os.getenv("IBKR_PAPER", "true").lower() in {"1", "true", "yes"},
             ibkr_auto_confirm_message_ids=ibkr_auto_confirm_message_ids,
             sec_user_agent=os.getenv("SEC_USER_AGENT", "Observatory admin@example.com"),
