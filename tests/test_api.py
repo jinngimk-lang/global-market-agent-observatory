@@ -59,6 +59,10 @@ def test_health_history_order_and_portfolio_flow(tmp_path) -> None:
     assert health.json()["auto_trading_enabled"] is False
     assert health.json()["live_execution_permitted"] is False
     assert health.json()["trading_state"] == "active"
+    assert health.json()["strategy_learning_enabled"] is True
+    assert health.json()["strategy_health_execution_allowed"] is True
+    assert health.json()["strategy_degraded"] == 0
+    assert health.json()["continuous_improvement_error"] is None
     assert candles[-1]["symbol"] == "BTCUSDT"
     assert order.status_code == 201
     assert order.json()["status"] == "filled"
@@ -128,6 +132,10 @@ def test_trading_status_is_read_only_and_exposes_no_credentials(tmp_path) -> Non
     assert payload["trading_state"] == "active"
     assert payload["auto_trading_enabled"] is False
     assert payload["trading_universe"] == ["KLAC", "NVDA", "SPCX"]
+    assert payload["continuous_improvement"]["enabled"] is True
+    assert payload["continuous_improvement"]["health_execution_allowed"] is True
+    assert payload["continuous_improvement"]["last_error"] is None
+    assert isinstance(payload["continuous_improvement"]["strategy_health"], list)
     assert "alpaca_api_key" not in payload
     assert "ibkr_account_id" not in payload
 
@@ -258,4 +266,3 @@ def test_http_responses_include_browser_security_headers(tmp_path) -> None:
     policy = response.headers["content-security-policy"]
     assert "default-src 'self'" in policy
     assert "connect-src 'self' ws: wss:" in policy
-    assert "https://unpkg.com" in policy
