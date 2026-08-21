@@ -40,6 +40,9 @@ class HealthResponse(BaseModel):
     trading_mode: str
     execution_provider: str
     auto_trading_enabled: bool
+    promotion_execution_allowed: bool
+    autonomous_execution_enabled: bool
+    strategy_promotion_blocked: int
     live_execution_permitted: bool
     trading_state: str
     market_source: str
@@ -94,11 +97,15 @@ def create_app(
 
     @app.get("/api/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
+        blocked = sum(1 for item in runtime.strategy_promotion_reports if not item.allowed)
         return HealthResponse(
             status="ok" if runtime.trading_state.value != "halted" else "halted",
             trading_mode=resolved_settings.trading_mode.value,
             execution_provider=resolved_settings.execution_provider.value,
             auto_trading_enabled=resolved_settings.auto_trading_enabled,
+            promotion_execution_allowed=runtime.promotion_execution_allowed,
+            autonomous_execution_enabled=runtime.autonomous_execution_enabled,
+            strategy_promotion_blocked=blocked,
             live_execution_permitted=resolved_settings.live_execution_permitted,
             trading_state=runtime.trading_state.value,
             market_source=resolved_settings.market_source,
@@ -114,6 +121,12 @@ def create_app(
             "trading_mode": resolved_settings.trading_mode.value,
             "execution_provider": resolved_settings.execution_provider.value,
             "auto_trading_enabled": resolved_settings.auto_trading_enabled,
+            "promotion_execution_allowed": runtime.promotion_execution_allowed,
+            "autonomous_execution_enabled": runtime.autonomous_execution_enabled,
+            "strategy_promotion": [
+                item.model_dump(mode="json")
+                for item in runtime.strategy_promotion_reports
+            ],
             "live_execution_permitted": resolved_settings.live_execution_permitted,
             "trading_state": runtime.trading_state.value,
             "market_source": resolved_settings.market_source,
