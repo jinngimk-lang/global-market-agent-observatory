@@ -175,6 +175,8 @@ class ApplicationState:
             else None
         )
         self.options_structure_errors: dict[str, str] = {}
+        self.last_options_structure_loop_error: str | None = None
+        self.options_structure_loop_failure_count = 0
 
         self.account_snapshots: dict[str, ExternalAccountSnapshot] = {}
         self.account_errors: dict[str, str] = {}
@@ -350,7 +352,16 @@ class ApplicationState:
 
     async def _run_options_structure(self) -> None:
         while True:
-            await self.refresh_options_structure_once()
+            try:
+                await self.refresh_options_structure_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.options_structure_loop_failure_count += 1
+                self.last_options_structure_loop_error = f"{type(exc).__name__}: {exc}"
+                if self.options_structure is not None:
+                    for symbol in self.settings.trading_universe:
+                        self.options_structure.invalidate(symbol)
             await asyncio.sleep(self.settings.options_structure_refresh_seconds)
 
     def refresh_continuous_improvement(self) -> list[StrategyHealth]:
