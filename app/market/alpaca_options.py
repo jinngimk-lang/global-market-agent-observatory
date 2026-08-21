@@ -171,7 +171,6 @@ class AlpacaOptionsChainClient:
                 )
             )
 
-        observations.sort(key=lambda item: (item.expiration_date, item.strike, item.right.value))
         return OptionChainObservation(
             feed=self.feed,
             underlying_symbol=symbol,
