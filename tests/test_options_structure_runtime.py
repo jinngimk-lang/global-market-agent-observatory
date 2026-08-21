@@ -4,12 +4,12 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from app.market.options_structure import OptionsStructureService
 
 from app.api.state import ApplicationState
 from app.domain.models import Candle, TradingMode
 from app.market.alpaca_options import OptionChainObservation, OptionContractObservation
 from app.market.options import OptionRight
-from app.market.options_structure import OptionsStructureService
 from app.settings import Settings
 from app.strategy.base import StrategyAction, StrategyInput, StrategySignal, hold_signal
 
