@@ -11,12 +11,20 @@ from app.domain.models import (
 )
 from app.execution.controller import ExecutionController
 from app.execution.models import ExecutionResult
+from app.trading.state_store import SQLiteTradingStateStore
 
 
 class TradingOrchestrator:
-    def __init__(self, *, execution: ExecutionController, audit: AuditService) -> None:
+    def __init__(
+        self,
+        *,
+        execution: ExecutionController,
+        audit: AuditService,
+        state_store: SQLiteTradingStateStore | None = None,
+    ) -> None:
         self._execution = execution
         self._audit = audit
+        self._state_store = state_store
 
     @property
     def trading_state(self) -> TradingState:
@@ -24,6 +32,7 @@ class TradingOrchestrator:
 
     def halt(self, reason: str) -> None:
         self._execution.set_trading_state(TradingState.HALTED)
+        self._persist_state(TradingState.HALTED, reason)
         self._audit.record(
             AuditEventType.KILL_SWITCH,
             subject="runtime",
@@ -32,6 +41,7 @@ class TradingOrchestrator:
 
     def reduce_only(self, reason: str) -> None:
         self._execution.set_trading_state(TradingState.REDUCING)
+        self._persist_state(TradingState.REDUCING, reason)
         self._audit.record(
             AuditEventType.SYSTEM,
             subject="runtime",
@@ -40,6 +50,7 @@ class TradingOrchestrator:
 
     def activate(self, reason: str = "operator activation") -> None:
         self._execution.set_trading_state(TradingState.ACTIVE)
+        self._persist_state(TradingState.ACTIVE, reason)
         self._audit.record(
             AuditEventType.SYSTEM,
             subject="runtime",
@@ -84,6 +95,10 @@ class TradingOrchestrator:
             },
         )
 
+        if self.trading_state is not previous_state:
+            transition_reason = f"execution_transition:{result.code}"
+            self._persist_state(self.trading_state, transition_reason)
+
         if (
             result.status is OrderStatus.UNKNOWN
             and previous_state is not TradingState.HALTED
@@ -99,3 +114,7 @@ class TradingOrchestrator:
             )
 
         return result
+
+    def _persist_state(self, state: TradingState, reason: str) -> None:
+        if self._state_store is not None:
+            self._state_store.set(state, reason=reason)
