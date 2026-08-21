@@ -12,6 +12,9 @@ from app.domain.models import ExternalAccountSnapshot, RiskLimits, TradingState
 from app.execution.controller import ExecutionController
 from app.innovation.registry import RuntimeStrategyPromotion, StrategyPromotionRegistry
 from app.innovation.store import SQLiteStrategyEvidenceStore
+from app.learning.models import StrategyHealth, StrategyHealthPolicy
+from app.learning.service import StrategyLearningService
+from app.learning.store import SQLiteStrategyLearningStore
 from app.market.alpaca import AlpacaStockBarFeed
 from app.market.binance import BinanceKlineFeed
 from app.market.hub import MarketHub
@@ -105,13 +108,33 @@ class ApplicationState:
                 settings.trading_mode,
             )
         )
-        self.promotion_execution_allowed = bool(self.strategy_promotion_reports) and all(
-            report.allowed for report in self.strategy_promotion_reports
-        )
-        autonomous_execution_enabled = (
-            settings.auto_trading_enabled and self.promotion_execution_allowed
-        )
+        self.promotion_execution_allowed = self._promotion_allowed()
 
+        self.strategy_learning_store = SQLiteStrategyLearningStore(settings.database_path)
+        self.learning = StrategyLearningService(
+            store=self.strategy_learning_store,
+            evidence_store=self.strategy_evidence_store,
+            mode=settings.trading_mode,
+            evaluation_horizon_seconds=settings.strategy_evaluation_horizon_seconds,
+            transaction_cost_bps=settings.strategy_transaction_cost_bps,
+            health_policy=StrategyHealthPolicy(
+                min_observations=settings.strategy_degradation_min_observations,
+                window_observations=settings.strategy_degradation_window_observations,
+                min_expectancy_after_costs=(
+                    settings.strategy_degradation_min_expectancy_after_costs
+                ),
+                max_drawdown=settings.strategy_degradation_max_drawdown,
+            ),
+        )
+        self.strategy_health_reports: list[StrategyHealth] = []
+        self.strategy_health_execution_allowed = True
+        self.last_improvement_error: str | None = None
+
+        autonomous_execution_enabled = (
+            settings.auto_trading_enabled
+            and self.promotion_execution_allowed
+            and self.strategy_health_execution_allowed
+        )
         self.autonomous = AutonomousTradingEngine(
             store=self.store,
             strategies=self.strategies,
@@ -129,6 +152,7 @@ class ApplicationState:
         self.last_cycle_errors: dict[str, str] = {}
         self._feed_task: asyncio.Task[None] | None = None
         self._account_task: asyncio.Task[None] | None = None
+        self._improvement_task: asyncio.Task[None] | None = None
 
     @property
     def trading_state(self) -> TradingState:
@@ -136,7 +160,15 @@ class ApplicationState:
 
     @property
     def autonomous_execution_enabled(self) -> bool:
-        return self.autonomous.execution_enabled
+        return (
+            self.autonomous.execution_enabled
+            and self.strategy_health_execution_allowed
+        )
+
+    def _promotion_allowed(self) -> bool:
+        return bool(self.strategy_promotion_reports) and all(
+            report.allowed for report in self.strategy_promotion_reports
+        )
 
     def _build_market_feed(self):
         settings = self.settings
@@ -182,11 +214,16 @@ class ApplicationState:
                 self._run_account_observers(),
                 name="account-observers",
             )
+        if self.settings.strategy_learning_enabled and self._improvement_task is None:
+            self._improvement_task = asyncio.create_task(
+                self._run_continuous_improvement(),
+                name="continuous-improvement",
+            )
 
     async def stop(self) -> None:
         tasks = [
             task
-            for task in (self._feed_task, self._account_task)
+            for task in (self._feed_task, self._account_task, self._improvement_task)
             if task is not None
         ]
         for task in tasks:
@@ -198,12 +235,23 @@ class ApplicationState:
                 pass
         self._feed_task = None
         self._account_task = None
+        self._improvement_task = None
+
+    async def process_candle(self, candle) -> TradingCycleResult:
+        self.store.mark_position(candle.symbol, Decimal(str(candle.close)))
+        cycle = await self.autonomous.on_candle(candle)
+        if (
+            self.settings.strategy_learning_enabled
+            and cycle.skipped_reason != "market_revision"
+        ):
+            self.learning.observe_cycle(candle, cycle)
+            self._apply_strategy_health(self.strategy_learning_store.list_health())
+        return cycle
 
     async def _run_feed(self) -> None:
         async for candle in self.feed.stream():
-            self.store.mark_position(candle.symbol, Decimal(str(candle.close)))
             try:
-                cycle = await self.autonomous.on_candle(candle)
+                cycle = await self.process_candle(candle)
                 self.last_cycle_results[candle.symbol] = cycle
                 self.last_cycle_errors.pop(candle.symbol, None)
             except asyncio.CancelledError:
@@ -217,6 +265,58 @@ class ApplicationState:
                 ):
                     self.orchestrator.halt(f"autonomous_cycle_error: {message}")
             await self.hub.publish(candle)
+
+    def refresh_continuous_improvement(self) -> list[StrategyHealth]:
+        if not self.settings.strategy_learning_enabled:
+            self.strategy_health_reports = []
+            self.strategy_health_execution_allowed = True
+            return []
+
+        reports = self.learning.refresh_all(self.strategies)
+        self._apply_strategy_health(reports)
+
+        # Learning evidence may change promotion eligibility, but this only
+        # updates the blocker report. It never mutates a manifest promotion
+        # stage or automatically turns execution on.
+        self.strategy_promotion_reports = self.strategy_promotion.evaluate_runtime(
+            self.strategies,
+            self.settings.trading_mode,
+        )
+        self.promotion_execution_allowed = self._promotion_allowed()
+        self.last_improvement_error = None
+        return reports
+
+    def _apply_strategy_health(self, reports: list[StrategyHealth]) -> None:
+        self.strategy_health_reports = reports
+        degraded = [report for report in reports if report.degraded]
+        self.strategy_health_execution_allowed = not degraded
+        if (
+            degraded
+            and self.settings.auto_trading_enabled
+            and self.trading_state is TradingState.ACTIVE
+        ):
+            identities = ",".join(
+                f"{report.strategy_id}@{report.version}" for report in degraded
+            )
+            self.orchestrator.reduce_only(f"strategy_degradation:{identities}")
+        # Deliberately no auto-reactivation here. A recovered strategy can
+        # clear the health blocker, but REDUCING/HALTED remains latched until
+        # a separate authenticated/operator-controlled recovery path exists.
+
+    async def _run_continuous_improvement(self) -> None:
+        while True:
+            try:
+                self.refresh_continuous_improvement()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.last_improvement_error = f"{type(exc).__name__}: {exc}"
+                if (
+                    self.settings.auto_trading_enabled
+                    and self.trading_state is TradingState.ACTIVE
+                ):
+                    self.orchestrator.reduce_only("continuous_improvement_failure")
+            await asyncio.sleep(self.settings.strategy_improvement_interval_seconds)
 
     async def _run_account_observers(self) -> None:
         while True:
