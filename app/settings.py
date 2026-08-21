@@ -33,6 +33,8 @@ class Settings(BaseModel):
     market_symbol: str = "BTCUSDT"
     market_interval: str = "1m"
     alpaca_market_data_feed: str = "iex"
+    market_feed_retry_seconds: float = 1.0
+    market_feed_retry_max_seconds: float = 30.0
     alpaca_options_feed: str = "indicative"
     options_structure_enabled: bool = True
     options_structure_refresh_seconds: float = 60.0
@@ -131,6 +133,8 @@ class Settings(BaseModel):
         "strategy_evaluation_horizon_seconds",
         "options_structure_refresh_seconds",
         "options_structure_max_age_seconds",
+        "market_feed_retry_seconds",
+        "market_feed_retry_max_seconds",
     )
     @classmethod
     def validate_positive_runtime_seconds(cls, value: float) -> float:
@@ -260,6 +264,10 @@ class Settings(BaseModel):
             market_symbol=os.getenv("MARKET_SYMBOL", "BTCUSDT"),
             market_interval=os.getenv("MARKET_INTERVAL", "1m"),
             alpaca_market_data_feed=os.getenv("ALPACA_MARKET_DATA_FEED", "iex").strip().lower(),
+            market_feed_retry_seconds=float(os.getenv("MARKET_FEED_RETRY_SECONDS", "1")),
+            market_feed_retry_max_seconds=float(
+                os.getenv("MARKET_FEED_RETRY_MAX_SECONDS", "30")
+            ),
             alpaca_options_feed=os.getenv("ALPACA_OPTIONS_FEED", "indicative").strip().lower(),
             options_structure_enabled=os.getenv("OPTIONS_STRUCTURE_ENABLED", "true").lower()
             in {"1", "true", "yes"},
