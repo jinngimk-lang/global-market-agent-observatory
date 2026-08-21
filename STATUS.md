@@ -2,6 +2,7 @@
 
 Updated: 2026-08-21
 Branch: `feature/autonomous-live-trading-platform`
+Draft PR: `#8`
 
 ## Recovery order
 
@@ -26,14 +27,18 @@ The intended runtime chain is:
 
 Live execution is a first-class capability but remains disabled by default and must fail closed.
 
+A second independent gate now exists: **broker execution capability does not imply strategy execution eligibility**. Strategies must be promoted for the selected runtime mode using persisted evidence for the exact strategy version.
+
 ## Completed on this branch
 
 ### Direction and recovery
 
 - Added `PROJECT_DIRECTION.md` as the long-horizon project compass.
-- Updated `AGENTS.md` with mandatory context recovery and live-trading safety rules.
-- Added this `STATUS.md` as the short-horizon execution checkpoint.
-- Added an implementation/design plan for the autonomous trading conversion.
+- Added `STATUS.md` as the short-horizon execution checkpoint.
+- Updated `AGENTS.md` with mandatory recovery order, live-trading safety rules, innovation doctrine, and strategy-promotion rules.
+- Added `docs/INNOVATION_DOCTRINE.md`.
+- Added `docs/decisions/0001-constraint-deletion-strategy-promotion.md`.
+- Opened draft PR `#8` to force full CI/container verification before merge.
 
 ### Trading modes and execution boundary
 
@@ -52,7 +57,8 @@ Live execution is a first-class capability but remains disabled by default and m
 - Added idempotent client-order-id behavior.
 - Added reconciliation-before-retry behavior for uncertain broker outcomes.
 - Unknown execution state causes fail-closed HALT.
-- Added append-only audit events for signals, risk decisions, execution, reconciliation, system state, and kill switch transitions.
+- Added persistent trading-state storage: HALT/REDUCING/ACTIVE survive process restart; corrupt/unknown persisted state fails closed to HALTED.
+- Added append-only audit events for signals, risk decisions, execution, reconciliation, system state, and kill-switch transitions.
 
 ### Market data and market structure
 
@@ -71,13 +77,39 @@ Live execution is a first-class capability but remains disabled by default and m
 - Added portfolio allocation based on loss budget, invalidation distance, per-order caps, and correlated/group exposure.
 - Cost basis is portfolio state only; it does not cause averaging down.
 
+### Innovation / strategy promotion
+
+- Added `StrategyHypothesis` manifests with:
+  - problem;
+  - category default;
+  - deleted constraint;
+  - new axis;
+  - expected mechanism;
+  - observable inputs;
+  - provenance requirements;
+  - falsification conditions;
+  - failure regimes;
+  - safety constraints;
+  - exact strategy version and promotion stage.
+- Added deterministic `StrategyPromotionGate` with canonical stages:
+  `idea -> research -> replay -> paper -> broker-paper -> live`.
+- Added persisted `PromotionEvidence` keyed by exact strategy id + version.
+- Runtime strategy code version must match its manifest version.
+- Missing manifest, missing evidence, version mismatch, or insufficient stage fails closed.
+- `ApplicationState` now separates:
+  - `AUTO_TRADING_ENABLED` requested by the operator;
+  - promotion eligibility for the selected mode;
+  - effective autonomous execution.
+- `/api/health` and `/api/trading/status` expose promotion blockers read-only.
+- Current VWAP and gamma-level strategies are explicitly at `replay` maturity; they cannot autonomously execute in `paper`, `broker-paper`, or `live` merely because broker connectivity exists.
+
 ### Autonomous loop
 
 - Added an autonomous market-cycle engine that processes bars through strategy -> allocation -> risk -> execution -> audit.
 - Monitoring mode can generate signals without sending orders.
 - Market-data revisions are stored but do not trigger duplicate execution.
 - Added deterministic cycle identity/checkpoint work to prevent replay/restart duplicate processing.
-- Main `ApplicationState` is being migrated to the new execution/orchestration architecture.
+- Main `ApplicationState` now builds the unified execution/orchestration/promotion architecture.
 - Legacy unauthenticated `/api/orders` remains local-paper-only and must never become a live broker write path.
 
 ### Broker truth / reconciliation
@@ -86,57 +118,68 @@ Live execution is a first-class capability but remains disabled by default and m
 - Added daily account PnL support to broker snapshots.
 - Live/broker modes treat missing critical broker state as invalid rather than silently substituting zero.
 
-## Innovation-method integration — current workstream
+## Innovation-method application
 
-The uploaded innovation skill is being adapted into a trading-system doctrine rather than copied literally.
+The uploaded innovation skill is adapted as a trading-system method, not copied as branding logic.
 
-Key project translation:
+Project translation:
 
 - `reframe before optimize` -> challenge the trading-system premise before optimizing indicators/parameters.
 - `category default` -> identify the assumption conventional trading systems optimize.
 - `constraint deletion` -> ask whether that assumption can disappear entirely.
-- `new axis` -> define the new system property that becomes the competitive edge.
+- `new axis` -> define the new measurable system property that becomes the edge.
 - three-direction exploration -> compare incremental improvement, observable-market bridge, and premise deletion before implementation.
-- creative review gate -> deterministic innovation/hypothesis review gate.
+- creative review gate -> deterministic hypothesis/innovation review gate.
 - persistent project protocol -> `PROJECT_DIRECTION.md` + `STATUS.md` + decision records + recovery order.
-
-The next implementation is a versioned Strategy Hypothesis / Promotion Gate so a strategy cannot jump from an appealing idea directly into live execution.
 
 ## Current strategy reframes
 
-### VWAP strategy
+### VWAP v1.0.0
 
 - Category default: use position relative to VWAP as a generic bullish/bearish indicator.
-- Deleted constraint: a strategy must predict direction from the level itself.
+- Deleted constraint: every VWAP observation must predict direction.
 - New axis: trade observable state transitions across VWAP with explicit invalidation and abstain otherwise.
-- Current promotion state: research/replay; not approved for live autonomous risk.
+- Current promotion stage: `replay`.
+- Paper/broker-paper/live autonomous execution: blocked until version-specific evidence is persisted and promotion criteria pass.
 
-### Gamma wall strategy
+### Gamma Levels v1.0.0
 
-- Category default: treat call wall / put wall as authoritative support or resistance.
+- Category default: treat call wall / put wall estimates as authoritative support or resistance.
 - Deleted constraint: a wall estimate alone is sufficient evidence.
-- New axis: wall interaction must be confirmed by observable flow, with GEX methodology/sign assumptions retained.
-- Current promotion state: research/replay; not approved for live autonomous risk.
+- New axis: wall interaction must be confirmed by observable flow while GEX methodology/sign assumptions remain explicit.
+- Current promotion stage: `replay`.
+- Paper/broker-paper/live autonomous execution: blocked until version-specific evidence is persisted and promotion criteria pass.
+
+## Verification state
+
+Draft PR `#8` is active.
+
+Latest completed diagnostic CI exposed only two Ruff issues before pytest could run:
+
+- import formatting in `tests/test_market_intelligence.py`;
+- an unused `timedelta` import in `tests/test_reconciliation.py`.
+
+Both have been fixed on the branch. A fresh CI run is queued/running. Container build had already succeeded on the prior run. Do not mark the PR merge-ready until Ruff, pytest on Python 3.12/3.13, compile checks, skill check, and container build are all green on the current head.
 
 ## Immediate next steps
 
-1. Add `docs/INNOVATION_DOCTRINE.md` and a decision record for the reframing method.
-2. Implement Strategy Hypothesis manifests and a deterministic promotion gate.
-3. Enforce promotion stage when autonomous execution is enabled; current research strategies must not be allowed to jump directly to live.
-4. Finish persistent HALT/trading-state recovery across process restarts.
-5. Finish main API/runtime migration and expose read-only execution/promotion health.
-6. Integrate real options OI/Greeks data with provenance for GEX/call-wall/put-wall features.
-7. Add replay/backtest evidence collection with transaction costs and out-of-sample metrics.
+1. Finish current CI loop; inspect and fix any pytest/static failures on the current head.
+2. Integrate real options OI/Greeks data with provenance for GEX/call-wall/put-wall features.
+3. Add replay/backtest evidence collection with transaction costs and out-of-sample metrics.
+4. Feed those metrics into `PromotionEvidence` instead of manually asserting promotion.
+5. Add strategy degradation/automatic-disable evidence and policies.
+6. Add authenticated operator controls for kill-switch/reactivation; unauthenticated write paths remain non-live.
+7. Integrate dark-pool/off-exchange evidence only after source/methodology/latency are explicit.
 8. Promote strategies only through replay -> paper -> broker-paper -> live based on recorded evidence.
-9. Run full CI/static/container verification before merge.
+9. Keep PR #8 draft until full verification and review are complete.
 
 ## Known blockers / intentionally unfinished work
 
-- No strategy is yet approved for live autonomous execution.
-- Real options OI/Greeks provider ingestion is not yet complete.
-- Dark-pool/off-exchange data is not yet integrated.
-- Strategy performance evidence and walk-forward evaluation are not yet sufficient for live promotion.
-- Authenticated operator write APIs for manual kill-switch/reactivation are not yet implemented; unauthenticated write paths must remain non-live.
+- No strategy is approved for live autonomous execution.
+- Real options OI/Greeks provider ingestion is not complete.
+- Dark-pool/off-exchange data is not integrated.
+- Strategy performance evidence and walk-forward evaluation are not sufficient for paper/live promotion.
+- Authenticated operator write APIs for manual kill-switch/reactivation are not implemented; unauthenticated write paths remain non-live.
 - Live credentials are never stored in Git and are not part of this branch.
 
 ## Rule for future agents
