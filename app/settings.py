@@ -33,6 +33,11 @@ class Settings(BaseModel):
     market_symbol: str = "BTCUSDT"
     market_interval: str = "1m"
     alpaca_market_data_feed: str = "iex"
+    alpaca_options_feed: str = "indicative"
+    options_structure_enabled: bool = True
+    options_structure_refresh_seconds: float = 60.0
+    options_structure_max_age_seconds: float = 120.0
+    options_expiration_horizon_days: int = 45
     replay_delay_seconds: float = 0.4
     replay_seed: int = 42
     starting_cash: Decimal = Decimal("100000")
@@ -124,11 +129,20 @@ class Settings(BaseModel):
     @field_validator(
         "strategy_improvement_interval_seconds",
         "strategy_evaluation_horizon_seconds",
+        "options_structure_refresh_seconds",
+        "options_structure_max_age_seconds",
     )
     @classmethod
-    def validate_positive_learning_seconds(cls, value: float) -> float:
+    def validate_positive_runtime_seconds(cls, value: float) -> float:
         if value <= 0:
-            raise ValueError("strategy learning intervals must be positive")
+            raise ValueError("runtime intervals must be positive")
+        return value
+
+    @field_validator("options_expiration_horizon_days")
+    @classmethod
+    def validate_options_horizon(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("OPTIONS_EXPIRATION_HORIZON_DAYS must be positive")
         return value
 
     @field_validator("strategy_transaction_cost_bps")
@@ -246,6 +260,18 @@ class Settings(BaseModel):
             market_symbol=os.getenv("MARKET_SYMBOL", "BTCUSDT"),
             market_interval=os.getenv("MARKET_INTERVAL", "1m"),
             alpaca_market_data_feed=os.getenv("ALPACA_MARKET_DATA_FEED", "iex").strip().lower(),
+            alpaca_options_feed=os.getenv("ALPACA_OPTIONS_FEED", "indicative").strip().lower(),
+            options_structure_enabled=os.getenv("OPTIONS_STRUCTURE_ENABLED", "true").lower()
+            in {"1", "true", "yes"},
+            options_structure_refresh_seconds=float(
+                os.getenv("OPTIONS_STRUCTURE_REFRESH_SECONDS", "60")
+            ),
+            options_structure_max_age_seconds=float(
+                os.getenv("OPTIONS_STRUCTURE_MAX_AGE_SECONDS", "120")
+            ),
+            options_expiration_horizon_days=int(
+                os.getenv("OPTIONS_EXPIRATION_HORIZON_DAYS", "45")
+            ),
             replay_delay_seconds=float(os.getenv("REPLAY_DELAY_SECONDS", "0.4")),
             replay_seed=int(os.getenv("REPLAY_SEED", "42")),
             starting_cash=Decimal(os.getenv("STARTING_CASH", "100000")),
