@@ -6,13 +6,14 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.audit.service import AuditService
-from app.domain.models import AuditEventType, Candle
+from app.domain.models import AuditEventType, Candle, OrderStatus
 from app.execution.models import ExecutionResult
 from app.market.features import vwap
 from app.portfolio.engine import AllocationDecision, PortfolioAllocator
 from app.research.market_intelligence import MarketStructureSnapshot
 from app.store.sqlite import SQLiteStore
 from app.strategy.base import Strategy, StrategyAction, StrategyInput, StrategySignal
+from app.trading.cycle_store import SQLiteCycleCheckpointStore
 from app.trading.orchestrator import TradingOrchestrator
 from app.trading.portfolio_source import PortfolioSource
 
@@ -40,6 +41,7 @@ class AutonomousTradingEngine:
         execution_enabled: bool,
     ) -> None:
         self._store = store
+        self._cycle_store = SQLiteCycleCheckpointStore(store.path)
         self._strategies = strategies
         self._allocator = allocator
         self._portfolio_source = portfolio_source
@@ -58,13 +60,22 @@ class AutonomousTradingEngine:
         now: datetime | None = None,
         structure: MarketStructureSnapshot | None = None,
     ) -> TradingCycleResult:
-        self._store.upsert_candle(candle)
+        # Provider-declared revisions update market history but are never a second
+        # trading decision for an already observed minute.
         if candle.source.endswith(":updated"):
+            self._store.upsert_candle(candle)
             return TradingCycleResult(
                 symbol=candle.symbol,
                 skipped_reason="market_revision",
             )
 
+        if self._cycle_store.is_completed(candle):
+            return TradingCycleResult(
+                symbol=candle.symbol,
+                skipped_reason="cycle_already_completed",
+            )
+
+        self._store.upsert_candle(candle)
         candles = self._store.list_candles(
             candle.symbol,
             interval=candle.interval,
@@ -104,6 +115,7 @@ class AutonomousTradingEngine:
             signal for signal in signals if signal.action is not StrategyAction.HOLD
         ]
         if not actionable:
+            self._cycle_store.mark_completed(candle)
             return TradingCycleResult(symbol=candle.symbol, signals=signals)
 
         state = await self._portfolio_source.snapshot()
@@ -150,6 +162,12 @@ class AutonomousTradingEngine:
                         context,
                     )
                 )
+
+        # A monitoring-only cycle, a known risk rejection, or a known broker
+        # state is terminal for this exact market observation. UNKNOWN must not
+        # be checkpointed because restart/recovery still needs reconciliation.
+        if not any(result.status is OrderStatus.UNKNOWN for result in executions):
+            self._cycle_store.mark_completed(candle)
 
         return TradingCycleResult(
             symbol=candle.symbol,
