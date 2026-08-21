@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from app.domain.models import Candle, TradingMode
+from app.innovation.models import PromotionEvidence
 from app.innovation.store import SQLiteStrategyEvidenceStore
 from app.learning.models import StrategyHealthPolicy
 from app.learning.service import StrategyLearningService
@@ -131,3 +132,36 @@ def test_pending_observation_is_idempotent_for_same_strategy_signal(tmp_path) ->
     observations = learning_store.list_observations("vwap", "1.0.0")
     assert len(observations) == 1
     assert observations[0].status.value == "pending"
+
+
+def test_runtime_learning_never_erases_stronger_existing_evidence(tmp_path) -> None:
+    service, _, evidence_store = build_service(tmp_path)
+    evidence_store.upsert(
+        "vwap",
+        "1.0.0",
+        PromotionEvidence(
+            replay_observations=100,
+            expectancy_after_costs=Decimal("0.02"),
+            max_drawdown=Decimal("0.03"),
+            out_of_sample_verified=True,
+            evidence_refs=["walk-forward:2026q2"],
+        ),
+    )
+    first = candle(0, "100")
+    second = candle(1, "110")
+
+    service.observe_cycle(
+        first,
+        TradingCycleResult(symbol="NVDA", signals=[signal(first.close_time)]),
+    )
+    service.observe_cycle(second, TradingCycleResult(symbol="NVDA"))
+
+    evidence = evidence_store.get("vwap", "1.0.0")
+
+    assert evidence is not None
+    assert evidence.replay_observations == 100
+    assert evidence.expectancy_after_costs == Decimal("0.02")
+    assert evidence.max_drawdown == Decimal("0.03")
+    assert evidence.out_of_sample_verified is True
+    assert "walk-forward:2026q2" in evidence.evidence_refs
+    assert any(ref.startswith("runtime-learning:") for ref in evidence.evidence_refs)
