@@ -10,6 +10,8 @@ from app.broker.factory import build_account_observers
 from app.broker.paper import PaperBroker
 from app.domain.models import ExternalAccountSnapshot, RiskLimits, TradingState
 from app.execution.controller import ExecutionController
+from app.innovation.registry import RuntimeStrategyPromotion, StrategyPromotionRegistry
+from app.innovation.store import SQLiteStrategyEvidenceStore
 from app.market.alpaca import AlpacaStockBarFeed
 from app.market.binance import BinanceKlineFeed
 from app.market.hub import MarketHub
@@ -19,6 +21,7 @@ from app.risk.engine import RiskEngine
 from app.settings import Settings
 from app.store.sqlite import SQLiteStore
 from app.strategy.gamma_levels import GammaLevelsStrategy
+from app.strategy.manifests import strategy_hypotheses
 from app.strategy.vwap import VWAPStrategy
 from app.trading.autonomous import AutonomousTradingEngine, TradingCycleResult
 from app.trading.orchestrator import TradingOrchestrator
@@ -84,14 +87,34 @@ class ApplicationState:
         )
         self.observers = {observer.name: observer for observer in selected_observers}
         self.portfolio_source = self._build_portfolio_source()
+
+        self.strategies = [VWAPStrategy(), GammaLevelsStrategy()]
+        self.strategy_evidence_store = SQLiteStrategyEvidenceStore(settings.database_path)
+        self.strategy_promotion = StrategyPromotionRegistry(
+            manifests=strategy_hypotheses(),
+            evidence_store=self.strategy_evidence_store,
+        )
+        self.strategy_promotion_reports: list[RuntimeStrategyPromotion] = (
+            self.strategy_promotion.evaluate_runtime(
+                self.strategies,
+                settings.trading_mode,
+            )
+        )
+        self.promotion_execution_allowed = bool(self.strategy_promotion_reports) and all(
+            report.allowed for report in self.strategy_promotion_reports
+        )
+        autonomous_execution_enabled = (
+            settings.auto_trading_enabled and self.promotion_execution_allowed
+        )
+
         self.autonomous = AutonomousTradingEngine(
             store=self.store,
-            strategies=[VWAPStrategy(), GammaLevelsStrategy()],
+            strategies=self.strategies,
             allocator=self.allocator,
             portfolio_source=self.portfolio_source,
             orchestrator=self.orchestrator,
             audit=self.audit,
-            execution_enabled=settings.auto_trading_enabled,
+            execution_enabled=autonomous_execution_enabled,
         )
 
         self.feed = self._build_market_feed()
@@ -105,6 +128,10 @@ class ApplicationState:
     @property
     def trading_state(self) -> TradingState:
         return self.orchestrator.trading_state
+
+    @property
+    def autonomous_execution_enabled(self) -> bool:
+        return self.autonomous.execution_enabled
 
     def _build_market_feed(self):
         settings = self.settings
@@ -180,7 +207,7 @@ class ApplicationState:
                 message = f"{type(exc).__name__}: {exc}"
                 self.last_cycle_errors[candle.symbol] = message
                 if (
-                    self.settings.auto_trading_enabled
+                    self.autonomous_execution_enabled
                     and self.trading_state is not TradingState.HALTED
                 ):
                     self.orchestrator.halt(f"autonomous_cycle_error: {message}")
