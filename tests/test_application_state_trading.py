@@ -37,7 +37,7 @@ def test_alpaca_market_source_streams_configured_equity_universe(tmp_path) -> No
     assert state.feed.feed == "iex"
 
 
-def test_auto_trading_flag_controls_strategy_to_execution_bridge(tmp_path) -> None:
+def test_auto_trading_flag_cannot_bypass_strategy_promotion_gate(tmp_path) -> None:
     state = ApplicationState(
         Settings(
             database_path=str(tmp_path / "app.db"),
@@ -45,7 +45,9 @@ def test_auto_trading_flag_controls_strategy_to_execution_bridge(tmp_path) -> No
         )
     )
 
-    assert state.autonomous.execution_enabled is True
+    assert state.settings.auto_trading_enabled is True
+    assert state.promotion_execution_allowed is False
+    assert state.autonomous.execution_enabled is False
 
 
 def test_alpaca_broker_paper_uses_broker_authoritative_portfolio_source(tmp_path) -> None:
