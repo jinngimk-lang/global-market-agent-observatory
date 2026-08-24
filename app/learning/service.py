@@ -13,6 +13,7 @@ from app.learning.models import (
     StrategyHealthPolicy,
     StrategyObservation,
     StrategyObservationStatus,
+    StrategySymbolAttribution,
 )
 from app.learning.store import SQLiteStrategyLearningStore
 from app.strategy.base import StrategyAction, StrategySignal
@@ -94,29 +95,46 @@ class StrategyLearningService:
         )
         recent = observations[-self._policy.window_observations :]
         returns = [item.net_return for item in recent if item.net_return is not None]
-        closed_observations = len(returns)
-        expectancy = (
-            sum(returns, Decimal("0")) / Decimal(closed_observations)
-            if closed_observations
-            else None
+        closed_observations, expectancy, win_rate, max_drawdown = self._metrics(returns)
+        reasons = self._degradation_reasons(
+            closed_observations,
+            expectancy,
+            max_drawdown,
         )
-        win_rate = (
-            Decimal(sum(1 for value in returns if value > 0)) / Decimal(closed_observations)
-            if closed_observations
-            else None
-        )
-        max_drawdown = self._max_drawdown(returns) if returns else None
 
-        reasons: list[str] = []
-        if closed_observations >= self._policy.min_observations:
-            if (
-                expectancy is not None
-                and expectancy <= self._policy.min_expectancy_after_costs
-            ):
-                reasons.append("negative_expectancy")
-            if max_drawdown is not None and max_drawdown > self._policy.max_drawdown:
-                reasons.append("drawdown_limit")
+        symbol_attribution: list[StrategySymbolAttribution] = []
+        symbols = sorted({item.symbol for item in observations})
+        for symbol in symbols:
+            symbol_observations = [item for item in observations if item.symbol == symbol]
+            symbol_recent = symbol_observations[-self._policy.window_observations :]
+            symbol_returns = [
+                item.net_return for item in symbol_recent if item.net_return is not None
+            ]
+            (
+                symbol_count,
+                symbol_expectancy,
+                symbol_win_rate,
+                symbol_drawdown,
+            ) = self._metrics(symbol_returns)
+            symbol_reasons = self._degradation_reasons(
+                symbol_count,
+                symbol_expectancy,
+                symbol_drawdown,
+            )
+            attribution = StrategySymbolAttribution(
+                symbol=symbol,
+                closed_observations=symbol_count,
+                expectancy_after_costs=symbol_expectancy,
+                max_drawdown=symbol_drawdown,
+                win_rate=symbol_win_rate,
+                degraded=bool(symbol_reasons),
+                degradation_reasons=symbol_reasons,
+            )
+            symbol_attribution.append(attribution)
+            if attribution.degraded:
+                reasons.append(f"symbol_degraded:{symbol}")
 
+        reasons = list(dict.fromkeys(reasons))
         health = StrategyHealth(
             strategy_id=strategy_id.strip().lower(),
             version=version.strip(),
@@ -126,11 +144,48 @@ class StrategyLearningService:
             win_rate=win_rate,
             degraded=bool(reasons),
             degradation_reasons=reasons,
+            symbol_attribution=symbol_attribution,
             updated_at=self._now_from_observations(observations),
         )
         self._store.upsert_health(health)
         self._sync_promotion_evidence(health)
         return health
+
+    @staticmethod
+    def _metrics(
+        returns: list[Decimal],
+    ) -> tuple[int, Decimal | None, Decimal | None, Decimal | None]:
+        count = len(returns)
+        expectancy = (
+            sum(returns, Decimal("0")) / Decimal(count)
+            if count
+            else None
+        )
+        win_rate = (
+            Decimal(sum(1 for value in returns if value > 0)) / Decimal(count)
+            if count
+            else None
+        )
+        max_drawdown = StrategyLearningService._max_drawdown(returns) if returns else None
+        return count, expectancy, win_rate, max_drawdown
+
+    def _degradation_reasons(
+        self,
+        closed_observations: int,
+        expectancy: Decimal | None,
+        max_drawdown: Decimal | None,
+    ) -> list[str]:
+        reasons: list[str] = []
+        if closed_observations < self._policy.min_observations:
+            return reasons
+        if (
+            expectancy is not None
+            and expectancy <= self._policy.min_expectancy_after_costs
+        ):
+            reasons.append("negative_expectancy")
+        if max_drawdown is not None and max_drawdown > self._policy.max_drawdown:
+            reasons.append("drawdown_limit")
+        return reasons
 
     def refresh_all(self, strategies: list[object]) -> list[StrategyHealth]:
         reports: list[StrategyHealth] = []
