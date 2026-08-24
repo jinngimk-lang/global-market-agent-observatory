@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
+from app.api.operator import build_operator_router
 from app.api.state import ApplicationState
 from app.broker.base import AccountObserver
 from app.domain.models import (
@@ -76,6 +77,9 @@ def create_app(
 
     app = FastAPI(title=resolved_settings.app_name, version="0.2.0", lifespan=lifespan)
     app.state.runtime = runtime
+    app.include_router(
+        build_operator_router(settings=resolved_settings, runtime=runtime)
+    )
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
