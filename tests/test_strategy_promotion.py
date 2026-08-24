@@ -88,6 +88,31 @@ def test_paper_promotion_requires_out_of_sample_positive_expectancy_and_drawdown
     assert allowed.code == "promotion_allowed"
 
 
+def test_paper_promotion_rejects_oos_boolean_without_holdout_depth() -> None:
+    gate = StrategyPromotionGate(
+        PromotionPolicy(min_replay_observations=100, max_replay_drawdown=Decimal("0.15"))
+    )
+
+    decision = gate.evaluate(
+        hypothesis(stage=StrategyStage.REPLAY),
+        PromotionEvidence(
+            deterministic_implementation=True,
+            data_provenance_complete=True,
+            replayable_data=True,
+            transaction_cost_model_documented=True,
+            out_of_sample_verified=True,
+            replay_observations=250,
+            expectancy_after_costs=Decimal("0.003"),
+            max_drawdown=Decimal("0.08"),
+        ),
+        target=StrategyStage.PAPER,
+    )
+
+    assert decision.allowed is False
+    assert "insufficient_oos_holdout_observations" in decision.blockers
+    assert "insufficient_walk_forward_folds" in decision.blockers
+
+
 def test_live_promotion_requires_broker_paper_and_execution_safety_evidence() -> None:
     gate = StrategyPromotionGate(
         PromotionPolicy(min_broker_paper_observations=30, max_live_drawdown=Decimal("0.12"))
