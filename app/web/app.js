@@ -1,5 +1,6 @@
 const runtime = window.ObservatoryRuntime.resolve(window.OBSERVATORY_CONFIG);
 const marketClient = window.ObservatoryMarketClient.create(runtime);
+const backendActions = window.ObservatoryBackendActions?.create(runtime) || null;
 
 const state = {
   runtime,
@@ -41,20 +42,73 @@ const reasonLabels = {
   insufficient_history: '历史数据不足',
 };
 
+const observeStatus = () => ({
+  trading_mode: 'observe',
+  execution_provider: 'none',
+  auto_trading_enabled: false,
+  promotion_execution_allowed: false,
+  autonomous_execution_enabled: false,
+  trading_state: 'active',
+  market_source: 'static',
+  market_symbol: runtime.market.symbol,
+  trading_universe: [runtime.market.symbol],
+  last_cycles: {},
+  strategy_promotion: [],
+  continuous_improvement: {
+    health_execution_allowed: true,
+    strategy_health: [],
+  },
+  runtime_loops: {},
+});
+
+const observePortfolio = () => ({
+  equity: 0,
+  cash: 0,
+  gross_exposure: 0,
+  realized_pnl_today: 0,
+  mode: 'observe',
+  positions: [],
+});
+
 function setText(id, value) {
   const node = document.getElementById(id);
   if (node) node.textContent = value;
 }
 
-async function fetchJSON(path, fallback) {
-  if (runtime.mode !== 'backend') return fallback;
+async function fetchBackendHistory(symbol) {
+  if (runtime.mode !== 'backend') return [];
   try {
-    const response = await fetch(apiUrl(path), {cache: 'no-store'});
+    const response = await fetch(
+      apiUrl(`/api/candles/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(state.interval)}&limit=300`),
+      {credentials: 'same-origin', cache: 'no-store'},
+    );
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-    return await response.json();
+    return response.json();
   } catch (error) {
-    console.error(`failed to fetch ${path}`, error);
-    return fallback;
+    console.error('failed to fetch candle history', error);
+    return [];
+  }
+}
+
+async function readBackendSnapshot() {
+  if (runtime.mode !== 'backend' || !backendActions) {
+    return [observeStatus(), observePortfolio(), [], []];
+  }
+  try {
+    return await Promise.all([
+      backendActions.loadTradingStatus(),
+      backendActions.loadPortfolio(),
+      backendActions.loadOrders(50),
+      backendActions.loadAudit(80),
+    ]);
+  } catch (error) {
+    console.error('failed to refresh trading dashboard', error);
+    return [
+      state.tradingStatus || observeStatus(),
+      state.portfolio || observePortfolio(),
+      state.orders || [],
+      state.audit || [],
+    ];
   }
 }
 
@@ -90,8 +144,10 @@ function initChart() {
 function candlePoint(item) {
   return {
     time: Math.floor(new Date(item.open_time).getTime() / 1000),
-    open: Number(item.open), high: Number(item.high),
-    low: Number(item.low), close: Number(item.close),
+    open: Number(item.open),
+    high: Number(item.high),
+    low: Number(item.low),
+    close: Number(item.close),
   };
 }
 
@@ -99,10 +155,7 @@ async function loadHistory() {
   if (!state.series) return;
   let candles = [];
   if (runtime.mode === 'backend') {
-    candles = await fetchJSON(
-      `/api/candles/${encodeURIComponent(state.symbol)}?interval=${encodeURIComponent(state.interval)}&limit=300`,
-      [],
-    );
+    candles = await fetchBackendHistory(state.symbol);
   } else if (state.symbol === runtime.market.symbol) {
     candles = await marketClient.loadHistory();
   }
@@ -204,11 +257,11 @@ function renderSystemSummary(status) {
   summary.append(title, body);
 
   const universe = status.trading_universe || [];
-  const sourceWarning = document.createElement('div');
-  sourceWarning.className = 'source-context';
+  const sourceContext = document.createElement('div');
+  sourceContext.className = 'source-context';
   const targetText = universe.length ? universe.join(' / ') : '未配置';
-  sourceWarning.textContent = `行情源：${String(status.market_source || '—').toUpperCase()} · 当前feed标的：${status.market_symbol || '—'} · 交易Universe：${targetText}`;
-  summary.appendChild(sourceWarning);
+  sourceContext.textContent = `行情源：${String(status.market_source || '—').toUpperCase()} · 当前feed标的：${status.market_symbol || '—'} · 交易Universe：${targetText}`;
+  summary.appendChild(sourceContext);
 
   if (
     status.market_source === 'replay'
@@ -228,6 +281,10 @@ function renderBadges(status) {
   const mode = document.getElementById('mode-badge');
   mode.textContent = `MODE ${String(status.trading_mode || '—').toUpperCase()}`;
   mode.className = 'badge muted';
+
+  const capability = document.getElementById('capability-badge');
+  capability.textContent = runtime.mode === 'backend' ? 'DECISION BACKEND' : 'OBSERVE ONLY';
+  capability.className = runtime.mode === 'backend' ? 'badge safe' : 'badge muted';
 
   const trading = document.getElementById('trading-state-badge');
   trading.textContent = `STATE ${String(status.trading_state || '—').toUpperCase()}`;
@@ -569,8 +626,7 @@ function renderRuntimeLoops(status) {
     const name = document.createElement('strong');
     name.textContent = label;
     const badge = document.createElement('span');
-    const configured = loop.enabled === false || loop.configured === 0 || loop.configured === false
-      ? false : true;
+    const configured = !(loop.enabled === false || loop.configured === 0 || loop.configured === false);
     const running = Boolean(loop.running);
     badge.textContent = !configured ? 'NOT CONFIGURED' : running ? 'RUNNING' : 'STOPPED';
     badge.className = !configured ? 'mini-status muted' : running ? 'mini-status safe' : 'mini-status danger';
@@ -585,7 +641,9 @@ function renderRuntimeLoops(status) {
 
     if (loop.symbol_errors && Object.keys(loop.symbol_errors).length) {
       const errors = document.createElement('small');
-      errors.textContent = Object.entries(loop.symbol_errors).map(([symbol, message]) => `${symbol}: ${message}`).join(' | ');
+      errors.textContent = Object.entries(loop.symbol_errors)
+        .map(([symbol, message]) => `${symbol}: ${message}`)
+        .join(' | ');
       card.appendChild(errors);
     }
     root.appendChild(card);
@@ -593,19 +651,7 @@ function renderRuntimeLoops(status) {
 }
 
 async function refreshAll() {
-  const [status, portfolio, orders, audit] = await Promise.all([
-    fetchJSON('/api/trading/status', {
-      trading_mode: 'observe', execution_provider: 'none', auto_trading_enabled: false,
-      promotion_execution_allowed: false, autonomous_execution_enabled: false,
-      trading_state: 'active', market_source: 'static', market_symbol: runtime.market.symbol,
-      trading_universe: [runtime.market.symbol], last_cycles: {}, strategy_promotion: [],
-      continuous_improvement: {health_execution_allowed: true, strategy_health: []}, runtime_loops: {},
-    }),
-    fetchJSON('/api/portfolio', {equity: 0, cash: 0, gross_exposure: 0, realized_pnl_today: 0, mode: 'observe', positions: []}),
-    fetchJSON('/api/orders?limit=50', []),
-    fetchJSON('/api/audit?limit=80', []),
-  ]);
-
+  const [status, portfolio, orders, audit] = await readBackendSnapshot();
   state.tradingStatus = status;
   state.portfolio = portfolio;
   state.orders = orders;
@@ -631,7 +677,5 @@ window.addEventListener('DOMContentLoaded', async () => {
   await refreshAll();
   await loadHistory();
   connectMarket();
-  if (runtime.mode === 'backend') {
-    setInterval(refreshAll, 3000);
-  }
+  if (runtime.mode === 'backend') setInterval(refreshAll, 3000);
 });
