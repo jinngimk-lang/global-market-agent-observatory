@@ -15,6 +15,7 @@
     }
 
     const loadTradingStatus = () => get('/api/trading/status', 'trading status');
+    const loadMarketStructure = () => get('/api/market/structure', 'market structure');
     const loadPortfolio = () => get('/api/portfolio', 'portfolio');
     const loadOrders = (limit = 50) => get(
       `/api/orders?limit=${encodeURIComponent(limit)}`,
@@ -27,6 +28,7 @@
 
     return Object.freeze({
       loadTradingStatus,
+      loadMarketStructure,
       loadPortfolio,
       loadOrders,
       loadAudit,
