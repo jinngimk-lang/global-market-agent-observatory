@@ -16,10 +16,26 @@ def test_dashboard_exposes_explicit_symbol_switcher() -> None:
     assert 'id="market-context-label"' in html
     assert 'src="/static/symbol-switcher.js"' in html
     assert "renderSymbolSwitcher" in source
-    assert "switchSymbol" in source
+    assert "navigateToSymbol" in source
     assert "trading_universe" in source
     assert "market_symbol" in source
     assert "美股自动交易" in source
+
+
+def test_symbol_selection_is_applied_before_runtime_initialization() -> None:
+    html = INDEX.read_text(encoding="utf-8")
+    source = SWITCHER.read_text(encoding="utf-8")
+
+    config_index = html.index('src="/static/config.js"')
+    switcher_index = html.index('src="/static/symbol-switcher.js"')
+    runtime_index = html.index('src="/static/runtime.js"')
+    app_index = html.index('src="/static/app.js"')
+
+    assert config_index < switcher_index < runtime_index < app_index
+    assert "applyRequestedSymbolToConfig();" in source
+    assert "global.OBSERVATORY_CONFIG = Object.freeze" in source
+    assert "url.searchParams.set('symbol', normalized);" in source
+    assert "global.location.assign(url.toString());" in source
 
 
 def test_backend_market_client_supports_dynamic_symbol_history_and_multi_symbol_stream() -> None:
