@@ -21,6 +21,7 @@ from app.domain.models import (
     Side,
     TradingMode,
 )
+from app.market.coverage import MarketCoverageSnapshot, build_market_coverage
 from app.research.github_releases import GitHubReleaseCollector
 from app.research.partnerships import assess_partnership
 from app.research.sec import SECCollector
@@ -295,6 +296,18 @@ def create_app(
             "generated_at": generated_at.isoformat(),
             "symbols": payload,
         }
+
+    @app.get("/api/market/coverage", response_model=MarketCoverageSnapshot)
+    async def market_coverage() -> MarketCoverageSnapshot:
+        return build_market_coverage(
+            store=runtime.store,
+            symbols=resolved_settings.trading_universe,
+            interval=resolved_settings.market_interval,
+            market_source=resolved_settings.market_source,
+            max_age_seconds=resolved_settings.market_data_max_age_seconds,
+            last_cycle_results=runtime.last_cycle_results,
+            last_cycle_errors=runtime.last_cycle_errors,
+        )
 
     @app.get("/api/candles/{symbol}")
     async def candles(
