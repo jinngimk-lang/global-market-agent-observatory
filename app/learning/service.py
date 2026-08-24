@@ -171,7 +171,7 @@ class StrategyLearningService:
         strategy_id: str,
         version: str,
     ) -> tuple[StrategyEvaluationPartition, int]:
-        index = self._store.count_observations(strategy_id, version)
+        index = self._store.count_walk_forward_observations(strategy_id, version)
         fold_size = (
             self._walk_forward_calibration_observations
             + self._walk_forward_holdout_observations
