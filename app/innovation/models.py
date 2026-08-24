@@ -50,6 +50,8 @@ class PromotionEvidence(BaseModel):
     replayable_data: bool = False
     transaction_cost_model_documented: bool = False
     out_of_sample_verified: bool = False
+    oos_holdout_observations: int = 0
+    walk_forward_folds: int = 0
     replay_observations: int = 0
     paper_observations: int = 0
     broker_paper_observations: int = 0
@@ -61,7 +63,13 @@ class PromotionEvidence(BaseModel):
     degradation_rule_defined: bool = False
     evidence_refs: list[str] = Field(default_factory=list)
 
-    @field_validator("replay_observations", "paper_observations", "broker_paper_observations")
+    @field_validator(
+        "oos_holdout_observations",
+        "walk_forward_folds",
+        "replay_observations",
+        "paper_observations",
+        "broker_paper_observations",
+    )
     @classmethod
     def non_negative_counts(cls, value: int) -> int:
         if value < 0:
