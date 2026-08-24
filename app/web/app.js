@@ -11,6 +11,7 @@ const state = {
   disconnectMarket: null,
   tradingStatus: null,
   marketStructure: {generated_at: null, symbols: {}},
+  marketCoverage: {generated_at: null, fresh_coverage_ratio: 0, symbols: {}},
   portfolio: null,
   orders: [],
   audit: [],
@@ -84,6 +85,28 @@ const observeMarketStructure = () => ({
   },
 });
 
+const observeMarketCoverage = () => ({
+  generated_at: null,
+  market_source: 'static',
+  interval: runtime.market.interval,
+  fresh_symbols: [],
+  stale_symbols: [],
+  missing_symbols: [runtime.market.symbol],
+  fresh_coverage_ratio: 0,
+  symbols: {
+    [runtime.market.symbol]: {
+      status: 'missing',
+      source: null,
+      latest_price: null,
+      open_time: null,
+      close_time: null,
+      age_seconds: null,
+      cycle_status: 'waiting',
+      cycle_error: null,
+    },
+  },
+});
+
 const observePortfolio = () => ({
   equity: 0,
   cash: 0,
@@ -115,12 +138,20 @@ async function fetchBackendHistory(symbol) {
 
 async function readBackendSnapshot() {
   if (runtime.mode !== 'backend' || !backendActions) {
-    return [observeStatus(), observeMarketStructure(), observePortfolio(), [], []];
+    return [
+      observeStatus(),
+      observeMarketStructure(),
+      observeMarketCoverage(),
+      observePortfolio(),
+      [],
+      [],
+    ];
   }
   try {
     return await Promise.all([
       backendActions.loadTradingStatus(),
       backendActions.loadMarketStructure(),
+      backendActions.loadMarketCoverage(),
       backendActions.loadPortfolio(),
       backendActions.loadOrders(50),
       backendActions.loadAudit(80),
@@ -130,6 +161,7 @@ async function readBackendSnapshot() {
     return [
       state.tradingStatus || observeStatus(),
       state.marketStructure || observeMarketStructure(),
+      state.marketCoverage || observeMarketCoverage(),
       state.portfolio || observePortfolio(),
       state.orders || [],
       state.audit || [],
@@ -245,6 +277,10 @@ function structureStatusFor(symbol) {
   return state.marketStructure?.symbols?.[symbol] || null;
 }
 
+function coverageStatusFor(symbol) {
+  return state.marketCoverage?.symbols?.[symbol] || null;
+}
+
 function observedValue(value, digits = 4) {
   if (value == null || value === '') return '未观测';
   return number(value, digits);
@@ -264,12 +300,49 @@ function structureFreshness(item) {
   return 'FRESH';
 }
 
+function feedCoverageLabel(item) {
+  if (!item || item.status === 'missing') return 'FEED MISSING';
+  if (item.status === 'stale') return 'FEED STALE';
+  return 'FEED FRESH';
+}
+
+function cycleCoverageLabel(item) {
+  if (!item) return 'WAITING';
+  if (item.cycle_status === 'error') return 'CYCLE ERROR';
+  return String(item.cycle_status || 'waiting').toUpperCase();
+}
+
+function appendCoverageWarnings(card, coverage) {
+  const feedLabel = feedCoverageLabel(coverage);
+  if (feedLabel === 'FEED MISSING') {
+    const warning = document.createElement('div');
+    warning.className = 'truth-warning';
+    warning.textContent = 'FEED MISSING：该标的尚未收到任何 candle；页面不会把其他标的行情冒充为它的实时数据。';
+    card.appendChild(warning);
+  } else if (feedLabel === 'FEED STALE') {
+    const warning = document.createElement('div');
+    warning.className = 'truth-warning';
+    warning.textContent = `FEED STALE：最后 candle 已超过风险 freshness threshold${coverage?.age_seconds != null ? `（约 ${number(coverage.age_seconds, 1)}s）` : ''}；这不自动等同于数据源故障。`;
+    card.appendChild(warning);
+  }
+
+  if (coverage?.cycle_status === 'error') {
+    const warning = document.createElement('div');
+    warning.className = 'truth-warning';
+    warning.textContent = `CYCLE ERROR：行情已经进入系统，但策略/组合处理失败。${coverage.cycle_error ? ` ${coverage.cycle_error}` : ''}`;
+    card.appendChild(warning);
+  }
+}
+
 function appendMarketStructureFacts(card, symbol) {
   const item = structureStatusFor(symbol);
+  const coverage = coverageStatusFor(symbol);
   const structure = item?.structure || null;
   const facts = document.createElement('div');
   facts.className = 'decision-facts structure-facts';
   const values = [
+    ['Feed覆盖', feedCoverageLabel(coverage)],
+    ['Cycle处理', cycleCoverageLabel(coverage)],
     ['VWAP', observedPrice(structure?.vwap)],
     ['OFI', observedValue(structure?.order_flow_imbalance, 4)],
     ['Put Wall 估算', observedPrice(structure?.put_wall)],
@@ -288,6 +361,8 @@ function appendMarketStructureFacts(card, symbol) {
   }
   card.appendChild(facts);
 
+  appendCoverageWarnings(card, coverage);
+
   if (!item || item.status !== 'observed') {
     const warning = document.createElement('div');
     warning.className = 'truth-warning';
@@ -302,7 +377,8 @@ function appendMarketStructureFacts(card, symbol) {
   const optionsSource = provenance.options_provider
     ? ` · Options ${provenance.options_provider}${provenance.options_feed ? `/${provenance.options_feed}` : ''}`
     : '';
-  source.textContent = `结构来源：${item.market_source || provenance.market_source || '—'}${optionsSource} · observed ${item.observed_at || '—'}`;
+  const feedSource = coverage?.source ? ` · candle ${coverage.source}` : '';
+  source.textContent = `结构来源：${item.market_source || provenance.market_source || '—'}${feedSource}${optionsSource} · observed ${item.observed_at || '—'}`;
   card.appendChild(source);
 
   const freshness = structureFreshness(item);
@@ -360,7 +436,8 @@ function renderSystemSummary(status) {
   const sourceContext = document.createElement('div');
   sourceContext.className = 'source-context';
   const targetText = universe.length ? universe.join(' / ') : '未配置';
-  sourceContext.textContent = `行情源：${String(status.market_source || '—').toUpperCase()} · 当前feed标的：${status.market_symbol || '—'} · 交易Universe：${targetText}`;
+  const freshCount = state.marketCoverage?.fresh_symbols?.length || 0;
+  sourceContext.textContent = `行情源：${String(status.market_source || '—').toUpperCase()} · 当前feed标的：${status.market_symbol || '—'} · 交易Universe：${targetText} · Fresh覆盖：${freshCount}/${universe.length || 0}`;
   summary.appendChild(sourceContext);
 
   if (
@@ -371,6 +448,15 @@ function renderSystemSummary(status) {
     const warning = document.createElement('div');
     warning.className = 'truth-warning';
     warning.textContent = `当前只是 ${status.market_symbol} 的 replay 行情；${targetText} 尚未收到对应实时市场 cycle。页面不会把跳动K线伪装成这些股票正在被自动交易。`;
+    summary.appendChild(warning);
+  }
+
+  if (universe.length && freshCount < universe.length) {
+    const missing = state.marketCoverage?.missing_symbols || [];
+    const stale = state.marketCoverage?.stale_symbols || [];
+    const warning = document.createElement('div');
+    warning.className = 'truth-warning';
+    warning.textContent = `当前 freshness 覆盖不足：${freshCount}/${universe.length}${missing.length ? ` · missing ${missing.join('/')}` : ''}${stale.length ? ` · stale ${stale.join('/')}` : ''}。非交易时段可能自然表现为 stale，不会自动把它判定成 feed 故障。`;
     summary.appendChild(warning);
   }
 
@@ -415,6 +501,7 @@ function renderDecisionCards(status) {
   for (const symbol of universe) {
     const cycle = status.last_cycles?.[symbol];
     const structureStatus = structureStatusFor(symbol);
+    const coverageStatus = coverageStatusFor(symbol);
     const signals = cycle?.signals || [];
     const action = aggregateAction(signals);
     const primary = actionableSignal(signals);
@@ -431,9 +518,11 @@ function renderDecisionCards(status) {
     const price = document.createElement('span');
     price.textContent = position
       ? `$${money(position.market_price)}`
-      : structureStatus?.latest_price != null
-        ? `$${money(structureStatus.latest_price)}`
-        : primary?.entry_price != null ? `$${money(primary.entry_price)}` : '暂无价格';
+      : coverageStatus?.latest_price != null
+        ? `$${money(coverageStatus.latest_price)}`
+        : structureStatus?.latest_price != null
+          ? `$${money(structureStatus.latest_price)}`
+          : primary?.entry_price != null ? `$${money(primary.entry_price)}` : '暂无价格';
     symbolBlock.append(symbolName, price);
     const badge = document.createElement('span');
     badge.className = `decision-action ${toneForAction(action)}`;
@@ -756,9 +845,10 @@ function renderRuntimeLoops(status) {
 }
 
 async function refreshAll() {
-  const [status, marketStructure, portfolio, orders, audit] = await readBackendSnapshot();
+  const [status, marketStructure, marketCoverage, portfolio, orders, audit] = await readBackendSnapshot();
   state.tradingStatus = status;
   state.marketStructure = marketStructure;
+  state.marketCoverage = marketCoverage;
   state.portfolio = portfolio;
   state.orders = orders;
   state.audit = audit;
