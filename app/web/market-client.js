@@ -11,6 +11,18 @@
     return value * 60 * 1000;
   }
 
+  function candleTimestamp(candle) {
+    const value = Date.parse(candle?.open_time || '');
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function isOutOfOrderCandle(candle, latestTimestamp) {
+    const timestamp = candleTimestamp(candle);
+    return timestamp !== null
+      && Number.isFinite(latestTimestamp)
+      && timestamp < latestTimestamp;
+  }
+
   function seededRandom(seedText) {
     let state = 2166136261;
     for (const character of seedText) {
@@ -158,11 +170,31 @@
       let attempts = 0;
       let replayHistory = fallbackHistory(symbol, interval, 2);
       let replaySequence = 0;
+      const latestStreamTimes = new Map();
 
       function stopReplay() {
         if (replayTimer !== null) {
           global.clearInterval(replayTimer);
           replayTimer = null;
+        }
+      }
+
+      function deliverCandle(candle) {
+        const key = `${String(candle.symbol || '').toUpperCase()}:${candle.interval || interval}`;
+        const latestTimestamp = latestStreamTimes.get(key);
+        if (isOutOfOrderCandle(candle, latestTimestamp)) {
+          onStatus({state: 'degraded', label: 'OUT-OF-ORDER IGNORED'});
+          return;
+        }
+        const timestamp = candleTimestamp(candle);
+        if (timestamp !== null) latestStreamTimes.set(key, timestamp);
+
+        try {
+          if (runtime.mode === 'backend') onCandle(candle);
+          else if (candle.symbol === symbol) onCandle(candle);
+        } catch (error) {
+          console.error('market render callback failed', error);
+          onStatus({state: 'degraded', label: 'RENDER ERROR'});
         }
       }
 
@@ -174,7 +206,7 @@
           replaySequence += 1;
           const next = nextFallbackCandle(previous, replaySequence);
           replayHistory = [previous, next];
-          onCandle(next);
+          deliverCandle(next);
         }, Math.max(1000, intervalMilliseconds(interval) / 60));
       }
 
@@ -219,15 +251,7 @@
             onStatus({state: 'degraded', label: 'INVALID STREAM DATA'});
             return;
           }
-
-          if (!candle) return;
-          try {
-            if (runtime.mode === 'backend') onCandle(candle);
-            else if (candle.symbol === symbol) onCandle(candle);
-          } catch (error) {
-            console.error('market render callback failed', error);
-            onStatus({state: 'degraded', label: 'RENDER ERROR'});
-          }
+          if (candle) deliverCandle(candle);
         });
         socket.addEventListener('error', () => {
           onStatus({state: 'degraded', label: 'STREAM ERROR'});
@@ -247,5 +271,10 @@
     return Object.freeze({loadHistory, connect});
   }
 
-  global.ObservatoryMarketClient = Object.freeze({create, fallbackHistory, nextFallbackCandle});
+  global.ObservatoryMarketClient = Object.freeze({
+    create,
+    fallbackHistory,
+    nextFallbackCandle,
+    isOutOfOrderCandle,
+  });
 }(window));
