@@ -208,17 +208,25 @@
           onStatus({state: 'streaming', label: runtime.mode === 'static' ? 'PUBLIC STREAM' : 'STREAMING'});
         });
         socket.addEventListener('message', (event) => {
+          let candle = null;
           try {
             const payload = JSON.parse(event.data);
-            const candle = runtime.mode === 'backend'
-              ? (payload.type === 'candle' ? payload.data : null)
-              : (payload.k ? normalizeBinanceStream(symbol, interval, payload) : null);
-            if (candle) {
-              if (runtime.mode === 'backend') onCandle(candle);
-              else if (candle.symbol === symbol) onCandle(candle);
-            }
-          } catch (_) {
+            candle = runtime.mode === 'backend'
+              ? (payload && payload.type === 'candle' ? payload.data : null)
+              : (payload && payload.k ? normalizeBinanceStream(symbol, interval, payload) : null);
+          } catch (error) {
+            console.error('invalid market stream payload', error);
             onStatus({state: 'degraded', label: 'INVALID STREAM DATA'});
+            return;
+          }
+
+          if (!candle) return;
+          try {
+            if (runtime.mode === 'backend') onCandle(candle);
+            else if (candle.symbol === symbol) onCandle(candle);
+          } catch (error) {
+            console.error('market render callback failed', error);
+            onStatus({state: 'degraded', label: 'RENDER ERROR'});
           }
         });
         socket.addEventListener('error', () => {
