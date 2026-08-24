@@ -17,18 +17,25 @@ class ReplayFeed:
         seed: int = 42,
         delay_seconds: float = 0.4,
         start_price: float = 60000.0,
+        start_time: datetime | None = None,
     ) -> None:
         self.symbol = symbol.strip().upper()
         self.interval = interval
         self.seed = seed
         self.delay_seconds = delay_seconds
         self.start_price = start_price
+        if start_time is None:
+            self.start_time = None
+        elif start_time.tzinfo is None:
+            self.start_time = start_time.replace(tzinfo=UTC)
+        else:
+            self.start_time = start_time.astimezone(UTC)
 
     async def stream(self, *, limit: int | None = None) -> AsyncIterator[Candle]:
         rng = random.Random(self.seed)
         price = self.start_price
         count = 0
-        open_time = datetime.now(UTC).replace(second=0, microsecond=0)
+        open_time = self.start_time or datetime.now(UTC).replace(second=0, microsecond=0)
         while limit is None or count < limit:
             movement = rng.gauss(0, max(price * 0.0015, 1))
             close = max(price + movement, 0.01)
