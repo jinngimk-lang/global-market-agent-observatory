@@ -104,3 +104,47 @@ console.log(JSON.stringify({{first, second}}));
     for candle in payload.values():
         assert candle["high"] >= max(candle["open"], candle["close"])
         assert candle["low"] <= min(candle["open"], candle["close"])
+
+
+def test_backend_stream_does_not_mislabel_render_failure_as_invalid_data() -> None:
+    client_path = json.dumps(str(ROOT / "app" / "web" / "market-client.js"))
+    payload = run_node(
+        f"""
+const fs = require('fs');
+const vm = require('vm');
+let socket = null;
+class FakeWebSocket {{
+  constructor() {{ this.listeners = {{}}; socket = this; }}
+  addEventListener(name, callback) {{ this.listeners[name] = callback; }}
+  emit(name, event = {{}}) {{ if (this.listeners[name]) this.listeners[name](event); }}
+  close() {{}}
+  get readyState() {{ return 1; }}
+}}
+const window = {{
+  location: {{protocol: 'http:', host: '127.0.0.1:8000', href: 'http://127.0.0.1:8000/'}},
+  setTimeout, clearTimeout, setInterval, clearInterval,
+}};
+const context = vm.createContext({{window, WebSocket: FakeWebSocket, URL, console, setTimeout, clearTimeout, setInterval, clearInterval}});
+vm.runInContext(fs.readFileSync({client_path}, 'utf8'), context);
+const runtime = {{mode: 'backend', apiBase: '', market: {{symbol: 'BTCUSDT', interval: '1m'}}}};
+const statuses = [];
+const client = context.window.ObservatoryMarketClient.create(runtime);
+client.connect(
+  () => {{ throw new Error('chart rejected stale point'); }},
+  (status) => statuses.push(status.label),
+);
+socket.emit('open');
+socket.emit('message', {{data: JSON.stringify({{
+  type: 'candle',
+  data: {{
+    symbol: 'BTCUSDT', interval: '1m', open_time: '2026-08-24T06:31:00Z',
+    open: 59050, high: 59100, low: 59000, close: 59080, volume: 10, source: 'replay'
+  }}
+}})}});
+socket.emit('message', {{data: '{{'}});
+console.log(JSON.stringify({{statuses}}));
+"""
+    )
+
+    assert "RENDER ERROR" in payload["statuses"]
+    assert payload["statuses"].count("INVALID STREAM DATA") == 1
