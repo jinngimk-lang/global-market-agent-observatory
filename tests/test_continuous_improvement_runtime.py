@@ -7,6 +7,7 @@ import pytest
 
 from app.api.state import ApplicationState
 from app.domain.models import Candle, TradingMode
+from app.learning.models import StrategyObservation
 from app.learning.service import StrategyLearningService
 from app.settings import Settings
 from app.strategy.base import StrategyAction, StrategyInput, StrategySignal, hold_signal
@@ -201,3 +202,47 @@ def test_learning_locks_walk_forward_partition_before_outcome(tmp_path) -> None:
     assert [item.get("walk_forward_fold") for item in payloads[:30]] == [0] * 30
     assert payloads[30].get("evaluation_partition") == "calibration"
     assert payloads[30].get("walk_forward_fold") == 1
+
+
+def test_legacy_unassigned_observations_do_not_consume_walk_forward_slots(tmp_path) -> None:
+    state = ApplicationState(
+        Settings(
+            database_path=str(tmp_path / "legacy.db"),
+            trading_mode=TradingMode.REPLAY,
+            strategy_learning_enabled=True,
+            strategy_evaluation_horizon_seconds=3600,
+            strategy_transaction_cost_bps=Decimal("0"),
+        )
+    )
+    legacy_observed = datetime(2026, 8, 19, 12, 0, tzinfo=UTC)
+    for index in range(20):
+        state.strategy_learning_store.add_observation(
+            StrategyObservation(
+                observation_id=f"legacy-{index}",
+                strategy_id="vwap",
+                version="1.0.0",
+                symbol="NVDA",
+                mode=TradingMode.REPLAY,
+                action=StrategyAction.BUY,
+                entry_price=Decimal("100"),
+                observed_at=legacy_observed + timedelta(minutes=index),
+                due_at=datetime(2026, 8, 21, 12, 0, tzinfo=UTC),
+                transaction_cost_bps=Decimal("0"),
+            )
+        )
+
+    current = candle(0, "100")
+    state.learning.observe_cycle(
+        current,
+        TradingCycleResult(
+            symbol="NVDA",
+            signals=[buy_signal(current.close_time)],
+        ),
+    )
+
+    observations = state.strategy_learning_store.list_observations("vwap", "1.0.0")
+    new_observation = next(
+        item for item in observations if not item.observation_id.startswith("legacy-")
+    )
+    assert new_observation.evaluation_partition.value == "calibration"
+    assert new_observation.walk_forward_fold == 0
