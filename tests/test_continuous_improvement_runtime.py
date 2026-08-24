@@ -166,3 +166,38 @@ def test_continuous_improvement_never_auto_reactivates_reducing_runtime(tmp_path
 
     assert state.strategy_health_execution_allowed is True
     assert state.trading_state.value == "reducing"
+
+
+def test_learning_locks_walk_forward_partition_before_outcome(tmp_path) -> None:
+    state = ApplicationState(
+        Settings(
+            database_path=str(tmp_path / "walk-forward.db"),
+            trading_mode=TradingMode.REPLAY,
+            strategy_learning_enabled=True,
+            strategy_evaluation_horizon_seconds=3600,
+            strategy_transaction_cost_bps=Decimal("0"),
+        )
+    )
+
+    for index in range(31):
+        current = candle(index, str(100 + index))
+        state.learning.observe_cycle(
+            current,
+            TradingCycleResult(
+                symbol="NVDA",
+                signals=[buy_signal(current.close_time, str(100 + index))],
+            ),
+        )
+
+    observations = state.strategy_learning_store.list_observations("vwap", "1.0.0")
+    payloads = [item.model_dump(mode="json") for item in observations]
+
+    assert [item.get("evaluation_partition") for item in payloads[:20]] == [
+        "calibration"
+    ] * 20
+    assert [item.get("evaluation_partition") for item in payloads[20:30]] == [
+        "holdout"
+    ] * 10
+    assert [item.get("walk_forward_fold") for item in payloads[:30]] == [0] * 30
+    assert payloads[30].get("evaluation_partition") == "calibration"
+    assert payloads[30].get("walk_forward_fold") == 1
