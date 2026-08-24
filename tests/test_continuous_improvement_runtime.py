@@ -7,7 +7,11 @@ import pytest
 
 from app.api.state import ApplicationState
 from app.domain.models import Candle, TradingMode
-from app.learning.models import StrategyObservation
+from app.learning.models import (
+    StrategyEvaluationPartition,
+    StrategyObservation,
+    StrategyObservationStatus,
+)
 from app.learning.service import StrategyLearningService
 from app.settings import Settings
 from app.strategy.base import StrategyAction, StrategyInput, StrategySignal, hold_signal
@@ -41,6 +45,35 @@ def buy_signal(at: datetime, price: str = "100") -> StrategySignal:
         entry_price=Decimal(price),
         invalidation_price=Decimal("98"),
         generated_at=at,
+    )
+
+
+def closed_observation(
+    index: int,
+    *,
+    partition: StrategyEvaluationPartition,
+    fold: int,
+    net_return: Decimal,
+) -> StrategyObservation:
+    observed = datetime(2026, 8, 18, 12, 0, tzinfo=UTC) + timedelta(minutes=index)
+    closed = observed + timedelta(minutes=1)
+    return StrategyObservation(
+        observation_id=f"closed-{fold}-{partition.value}-{index}",
+        strategy_id="vwap",
+        version="1.0.0",
+        symbol="NVDA",
+        mode=TradingMode.REPLAY,
+        action=StrategyAction.BUY,
+        entry_price=Decimal("100"),
+        observed_at=observed,
+        due_at=closed,
+        transaction_cost_bps=Decimal("0"),
+        evaluation_partition=partition,
+        walk_forward_fold=fold,
+        status=StrategyObservationStatus.CLOSED,
+        exit_price=Decimal("101"),
+        net_return=net_return,
+        closed_at=closed,
     )
 
 
@@ -246,3 +279,46 @@ def test_legacy_unassigned_observations_do_not_consume_walk_forward_slots(tmp_pa
     )
     assert new_observation.evaluation_partition.value == "calibration"
     assert new_observation.walk_forward_fold == 0
+
+
+def test_promotion_evidence_uses_only_completed_prospective_holdouts(tmp_path) -> None:
+    state = ApplicationState(
+        Settings(
+            database_path=str(tmp_path / "oos.db"),
+            trading_mode=TradingMode.REPLAY,
+            strategy_learning_enabled=True,
+            strategy_transaction_cost_bps=Decimal("0"),
+            strategy_degradation_window_observations=100,
+        )
+    )
+    index = 0
+    for fold in range(2):
+        for _ in range(20):
+            state.strategy_learning_store.add_observation(
+                closed_observation(
+                    index,
+                    partition=StrategyEvaluationPartition.CALIBRATION,
+                    fold=fold,
+                    net_return=Decimal("1"),
+                )
+            )
+            index += 1
+        for _ in range(10):
+            state.strategy_learning_store.add_observation(
+                closed_observation(
+                    index,
+                    partition=StrategyEvaluationPartition.HOLDOUT,
+                    fold=fold,
+                    net_return=Decimal("0.01"),
+                )
+            )
+            index += 1
+
+    state.learning.refresh_strategy("vwap", "1.0.0")
+    evidence = state.strategy_evidence_store.get("vwap", "1.0.0")
+
+    assert evidence is not None
+    assert evidence.out_of_sample_verified is True
+    assert evidence.oos_holdout_observations == 20
+    assert evidence.walk_forward_folds == 2
+    assert evidence.expectancy_after_costs == Decimal("0.01")
