@@ -19,6 +19,8 @@ class PromotionPolicy(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     min_replay_observations: int = 100
+    min_oos_holdout_observations: int = 20
+    min_walk_forward_folds: int = 2
     min_paper_observations: int = 50
     min_broker_paper_observations: int = 30
     min_expectancy_after_costs: Decimal = Decimal("0")
@@ -195,6 +197,10 @@ class StrategyPromotionGate:
         blockers: list[str] = []
         if not evidence.out_of_sample_verified:
             blockers.append("out_of_sample_unverified")
+        if evidence.oos_holdout_observations < self.policy.min_oos_holdout_observations:
+            blockers.append("insufficient_oos_holdout_observations")
+        if evidence.walk_forward_folds < self.policy.min_walk_forward_folds:
+            blockers.append("insufficient_walk_forward_folds")
         if evidence.replay_observations < self.policy.min_replay_observations:
             blockers.append("insufficient_replay_observations")
         if evidence.expectancy_after_costs is None:
