@@ -10,6 +10,7 @@ from app.broker.paper_execution import PaperExecutionAdapter
 from app.domain.models import AuditEventType, Candle, OrderStatus, RiskLimits
 from app.execution.controller import ExecutionController
 from app.portfolio.engine import PortfolioAllocator, PortfolioPolicy
+from app.research.market_intelligence import MarketStructureSnapshot
 from app.risk.engine import RiskEngine
 from app.store.sqlite import SQLiteStore
 from app.strategy.gamma_levels import GammaLevelsStrategy
@@ -91,6 +92,40 @@ async def test_new_bar_runs_signal_allocation_risk_and_paper_execution(tmp_path)
     assert AuditEventType.STRATEGY_SIGNAL in event_types
     assert AuditEventType.RISK_DECISION in event_types
     assert AuditEventType.EXECUTION in event_types
+
+
+@pytest.mark.asyncio
+async def test_cycle_result_carries_exact_market_structure_used_by_strategies(tmp_path) -> None:
+    engine, _ = build_engine(tmp_path, execution_enabled=False)
+    candle = bar(0, 199)
+    supplied = MarketStructureSnapshot(
+        symbol="NVDA",
+        order_flow_imbalance=Decimal("0.4"),
+        net_gex_1pct=Decimal("123456"),
+        call_wall=Decimal("205"),
+        put_wall=Decimal("195"),
+        methodology={
+            "gamma": "fixture-gamma-method",
+            "options_provider": "fixture-options",
+        },
+    )
+
+    result = await engine.on_candle(
+        candle,
+        now=candle.close_time,
+        structure=supplied,
+    )
+
+    assert result.observed_at == candle.close_time
+    assert result.structure is not None
+    assert result.structure.vwap == Decimal("199")
+    assert result.structure.order_flow_imbalance == Decimal("0.4")
+    assert result.structure.net_gex_1pct == Decimal("123456")
+    assert result.structure.call_wall == Decimal("205")
+    assert result.structure.put_wall == Decimal("195")
+    assert result.structure.methodology["gamma"] == "fixture-gamma-method"
+    assert result.structure.methodology["options_provider"] == "fixture-options"
+    assert result.structure.methodology["vwap"] == "typical-price-volume:last-200-candles"
 
 
 @pytest.mark.asyncio
