@@ -31,6 +31,8 @@ class StrategyLearningService:
         health_policy: StrategyHealthPolicy | None = None,
         walk_forward_calibration_observations: int = 20,
         walk_forward_holdout_observations: int = 10,
+        oos_min_holdout_observations: int = 20,
+        oos_min_completed_folds: int = 2,
     ) -> None:
         if evaluation_horizon_seconds <= 0:
             raise ValueError("evaluation_horizon_seconds must be positive")
@@ -40,6 +42,10 @@ class StrategyLearningService:
             raise ValueError("walk_forward_calibration_observations must be positive")
         if walk_forward_holdout_observations <= 0:
             raise ValueError("walk_forward_holdout_observations must be positive")
+        if oos_min_holdout_observations <= 0:
+            raise ValueError("oos_min_holdout_observations must be positive")
+        if oos_min_completed_folds <= 0:
+            raise ValueError("oos_min_completed_folds must be positive")
         self._store = store
         self._evidence_store = evidence_store
         self._mode = mode
@@ -50,6 +56,8 @@ class StrategyLearningService:
             walk_forward_calibration_observations
         )
         self._walk_forward_holdout_observations = walk_forward_holdout_observations
+        self._oos_min_holdout_observations = oos_min_holdout_observations
+        self._oos_min_completed_folds = oos_min_completed_folds
 
     @property
     def store(self) -> SQLiteStrategyLearningStore:
@@ -228,6 +236,66 @@ class StrategyLearningService:
             return max(closed_times)
         return datetime.now(UTC)
 
+    def _walk_forward_oos_metrics(
+        self,
+        strategy_id: str,
+        version: str,
+    ) -> tuple[bool, int, int, Decimal | None, Decimal | None]:
+        observations = self._store.list_observations(
+            strategy_id,
+            version,
+            closed_only=True,
+        )
+        fold_returns: dict[int, dict[str, list[Decimal]]] = {}
+        for observation in observations:
+            if observation.walk_forward_fold is None or observation.net_return is None:
+                continue
+            if observation.evaluation_partition not in {
+                StrategyEvaluationPartition.CALIBRATION,
+                StrategyEvaluationPartition.HOLDOUT,
+            }:
+                continue
+            bucket = fold_returns.setdefault(
+                observation.walk_forward_fold,
+                {"calibration": [], "holdout": []},
+            )
+            bucket[observation.evaluation_partition.value].append(
+                observation.net_return
+            )
+
+        completed_folds = sorted(
+            fold
+            for fold, partitions in fold_returns.items()
+            if len(partitions[StrategyEvaluationPartition.CALIBRATION.value])
+            >= self._walk_forward_calibration_observations
+            and len(partitions[StrategyEvaluationPartition.HOLDOUT.value])
+            >= self._walk_forward_holdout_observations
+        )
+        holdout_returns = [
+            value
+            for fold in completed_folds
+            for value in fold_returns[fold][StrategyEvaluationPartition.HOLDOUT.value]
+        ]
+        holdout_observations = len(holdout_returns)
+        completed_fold_count = len(completed_folds)
+        expectancy = (
+            sum(holdout_returns, Decimal("0")) / Decimal(holdout_observations)
+            if holdout_observations
+            else None
+        )
+        max_drawdown = self._max_drawdown(holdout_returns) if holdout_returns else None
+        verified = (
+            holdout_observations >= self._oos_min_holdout_observations
+            and completed_fold_count >= self._oos_min_completed_folds
+        )
+        return (
+            verified,
+            holdout_observations,
+            completed_fold_count,
+            expectancy,
+            max_drawdown,
+        )
+
     def _sync_promotion_evidence(self, health: StrategyHealth) -> None:
         counts = self._store.count_closed_by_mode(health.strategy_id, health.version)
         existing = (
@@ -243,6 +311,13 @@ class StrategyLearningService:
             + existing.paper_observations
             + existing.broker_paper_observations
         )
+        (
+            runtime_oos_verified,
+            runtime_holdout_observations,
+            runtime_completed_folds,
+            runtime_oos_expectancy,
+            runtime_oos_drawdown,
+        ) = self._walk_forward_oos_metrics(health.strategy_id, health.version)
 
         refs = list(existing.evidence_refs)
         if health.closed_observations > 0:
@@ -252,26 +327,46 @@ class StrategyLearningService:
             )
             if reference not in refs:
                 refs.append(reference)
+        if runtime_oos_verified:
+            reference = (
+                f"walk-forward-oos:{health.strategy_id}@{health.version}:"
+                f"folds={runtime_completed_folds}:"
+                f"holdout={runtime_holdout_observations}"
+            )
+            if reference not in refs:
+                refs.append(reference)
 
-        # Runtime forward observations are supplemental evidence. They must
-        # never erase stronger replay/walk-forward evidence already persisted.
-        preserve_existing_metrics = (
+        existing_oos_stronger = (
             existing.out_of_sample_verified
-            or existing_total > runtime_total
+            and existing.oos_holdout_observations >= runtime_holdout_observations
+            and existing.walk_forward_folds >= runtime_completed_folds
         )
-        expectancy = (
-            existing.expectancy_after_costs
-            if preserve_existing_metrics and existing.expectancy_after_costs is not None
-            else health.expectancy_after_costs
-        )
-        max_drawdown = (
-            existing.max_drawdown
-            if preserve_existing_metrics and existing.max_drawdown is not None
-            else health.max_drawdown
-        )
+        if runtime_oos_verified and not existing_oos_stronger:
+            expectancy = runtime_oos_expectancy
+            max_drawdown = runtime_oos_drawdown
+        elif existing.out_of_sample_verified:
+            expectancy = existing.expectancy_after_costs
+            max_drawdown = existing.max_drawdown
+        elif existing_total > runtime_total:
+            expectancy = existing.expectancy_after_costs
+            max_drawdown = existing.max_drawdown
+        else:
+            expectancy = health.expectancy_after_costs
+            max_drawdown = health.max_drawdown
 
         updated = existing.model_copy(
             update={
+                "out_of_sample_verified": (
+                    existing.out_of_sample_verified or runtime_oos_verified
+                ),
+                "oos_holdout_observations": max(
+                    existing.oos_holdout_observations,
+                    runtime_holdout_observations,
+                ),
+                "walk_forward_folds": max(
+                    existing.walk_forward_folds,
+                    runtime_completed_folds,
+                ),
                 "replay_observations": max(existing.replay_observations, runtime_replay),
                 "paper_observations": max(existing.paper_observations, runtime_paper),
                 "broker_paper_observations": max(
