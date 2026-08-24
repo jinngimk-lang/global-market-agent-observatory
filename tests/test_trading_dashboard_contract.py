@@ -36,7 +36,7 @@ def test_dashboard_focuses_on_autonomous_trading_decisions() -> None:
         assert f'id="{removed}"' not in html
 
 
-def test_dashboard_reads_only_trading_decision_structure_and_audit_data() -> None:
+def test_dashboard_reads_only_trading_decision_structure_coverage_and_audit_data() -> None:
     source = APP_JS.read_text(encoding="utf-8")
     backend = BACKEND_JS.read_text(encoding="utf-8")
 
@@ -49,6 +49,7 @@ def test_dashboard_reads_only_trading_decision_structure_and_audit_data() -> Non
     for endpoint in [
         "/api/trading/status",
         "/api/market/structure",
+        "/api/market/coverage",
         "/api/portfolio",
         "/api/orders",
         "/api/audit",
@@ -57,15 +58,21 @@ def test_dashboard_reads_only_trading_decision_structure_and_audit_data() -> Non
 
     for market_truth in [
         "marketStructure",
+        "marketCoverage",
         "VWAP",
         "OFI",
         "Put Wall 估算",
         "Call Wall 估算",
         "Net GEX Proxy",
         "结构新鲜度",
+        "Feed覆盖",
+        "Cycle处理",
         "未观测",
         "OPTIONS STALE",
         "MARKET STALE",
+        "FEED MISSING",
+        "FEED STALE",
+        "CYCLE ERROR",
     ]:
         assert market_truth in source
 
