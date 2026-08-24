@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.domain.models import TradingMode
-from app.innovation.gate import StrategyPromotionGate
+from app.innovation.gate import PromotionPolicy, StrategyPromotionGate
 from app.innovation.models import PromotionEvidence, StrategyHypothesis, StrategyStage
 from app.innovation.store import SQLiteStrategyEvidenceStore
 
@@ -27,14 +27,21 @@ class StrategyPromotionRegistry:
         manifests: dict[str, StrategyHypothesis],
         evidence_store: SQLiteStrategyEvidenceStore,
         gate: StrategyPromotionGate | None = None,
+        promotion_policy: PromotionPolicy | None = None,
     ) -> None:
+        if gate is not None and promotion_policy is not None:
+            raise ValueError("provide gate or promotion_policy, not both")
         self._manifests = dict(manifests)
         self._evidence_store = evidence_store
-        self._gate = gate or StrategyPromotionGate()
+        self._gate = gate or StrategyPromotionGate(promotion_policy)
 
     @property
     def manifests(self) -> dict[str, StrategyHypothesis]:
         return dict(self._manifests)
+
+    @property
+    def promotion_policy(self) -> PromotionPolicy:
+        return self._gate.policy
 
     def evidence_for(self, strategy_id: str, version: str) -> PromotionEvidence:
         return self._evidence_store.get(strategy_id, version) or PromotionEvidence()
