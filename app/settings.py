@@ -65,6 +65,10 @@ class Settings(BaseModel):
     strategy_degradation_window_observations: int = 50
     strategy_degradation_min_expectancy_after_costs: Decimal = Decimal("0")
     strategy_degradation_max_drawdown: Decimal = Decimal("0.10")
+    strategy_walk_forward_calibration_observations: int = 20
+    strategy_walk_forward_holdout_observations: int = 10
+    strategy_oos_min_holdout_observations: int = 20
+    strategy_oos_min_completed_folds: int = 2
 
     live_trading_enabled: bool = False
     live_trading_confirmation: str | None = None
@@ -159,11 +163,15 @@ class Settings(BaseModel):
     @field_validator(
         "strategy_degradation_min_observations",
         "strategy_degradation_window_observations",
+        "strategy_walk_forward_calibration_observations",
+        "strategy_walk_forward_holdout_observations",
+        "strategy_oos_min_holdout_observations",
+        "strategy_oos_min_completed_folds",
     )
     @classmethod
     def validate_strategy_observation_counts(cls, value: int) -> int:
         if value <= 0:
-            raise ValueError("strategy degradation observation counts must be positive")
+            raise ValueError("strategy observation counts must be positive")
         return value
 
     @field_validator("strategy_degradation_max_drawdown")
@@ -313,6 +321,18 @@ class Settings(BaseModel):
             ),
             strategy_degradation_max_drawdown=Decimal(
                 os.getenv("STRATEGY_DEGRADATION_MAX_DRAWDOWN", "0.10")
+            ),
+            strategy_walk_forward_calibration_observations=int(
+                os.getenv("STRATEGY_WALK_FORWARD_CALIBRATION_OBSERVATIONS", "20")
+            ),
+            strategy_walk_forward_holdout_observations=int(
+                os.getenv("STRATEGY_WALK_FORWARD_HOLDOUT_OBSERVATIONS", "10")
+            ),
+            strategy_oos_min_holdout_observations=int(
+                os.getenv("STRATEGY_OOS_MIN_HOLDOUT_OBSERVATIONS", "20")
+            ),
+            strategy_oos_min_completed_folds=int(
+                os.getenv("STRATEGY_OOS_MIN_COMPLETED_FOLDS", "2")
             ),
             live_trading_enabled=os.getenv("LIVE_TRADING_ENABLED", "false").lower()
             in {"1", "true", "yes"},
