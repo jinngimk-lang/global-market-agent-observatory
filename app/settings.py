@@ -70,6 +70,10 @@ class Settings(BaseModel):
     strategy_oos_min_holdout_observations: int = 20
     strategy_oos_min_completed_folds: int = 2
 
+    # Separate operator-plane credential. It is deliberately unrelated to
+    # broker credentials and only gates explicit risk-state control endpoints.
+    operator_api_token: SecretStr | None = None
+
     live_trading_enabled: bool = False
     live_trading_confirmation: str | None = None
     account_poll_seconds: float = 15.0
@@ -333,6 +337,11 @@ class Settings(BaseModel):
             ),
             strategy_oos_min_completed_folds=int(
                 os.getenv("STRATEGY_OOS_MIN_COMPLETED_FOLDS", "2")
+            ),
+            operator_api_token=(
+                SecretStr(os.environ["OPERATOR_API_TOKEN"])
+                if os.getenv("OPERATOR_API_TOKEN")
+                else None
             ),
             live_trading_enabled=os.getenv("LIVE_TRADING_ENABLED", "false").lower()
             in {"1", "true", "yes"},
