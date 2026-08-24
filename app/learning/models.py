@@ -15,6 +15,12 @@ class StrategyObservationStatus(StrEnum):
     CLOSED = "closed"
 
 
+class StrategyEvaluationPartition(StrEnum):
+    UNASSIGNED = "unassigned"
+    CALIBRATION = "calibration"
+    HOLDOUT = "holdout"
+
+
 class StrategyHealthPolicy(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -51,6 +57,8 @@ class StrategyObservation(BaseModel):
     observed_at: datetime
     due_at: datetime
     transaction_cost_bps: Decimal
+    evaluation_partition: StrategyEvaluationPartition = StrategyEvaluationPartition.UNASSIGNED
+    walk_forward_fold: int | None = None
     status: StrategyObservationStatus = StrategyObservationStatus.PENDING
     exit_price: Decimal | None = None
     net_return: Decimal | None = None
