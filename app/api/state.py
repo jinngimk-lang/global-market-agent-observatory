@@ -222,11 +222,17 @@ class ApplicationState:
                 interval=settings.market_interval,
             )
         if settings.market_source == "replay":
+            latest = self.store.latest_candle(
+                settings.market_symbol,
+                interval=settings.market_interval,
+            )
             return ReplayFeed(
                 symbol=settings.market_symbol,
                 interval=settings.market_interval,
                 seed=settings.replay_seed,
                 delay_seconds=settings.replay_delay_seconds,
+                start_price=latest.close if latest is not None else 60000.0,
+                start_time=latest.close_time if latest is not None else None,
             )
         raise ValueError(f"Unsupported market source: {settings.market_source}")
 
