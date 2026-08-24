@@ -4,34 +4,33 @@
   function create(runtime) {
     const apiUrl = (path) => `${runtime.apiBase}${path}`;
 
-    async function loadOrders(limit = 50) {
-      const response = await fetch(apiUrl(`/api/orders?limit=${encodeURIComponent(limit)}`), {
+    async function get(path, label) {
+      const response = await fetch(apiUrl(path), {
+        method: 'GET',
         credentials: 'same-origin',
+        cache: 'no-store',
       });
-      if (!response.ok) throw new Error(`order history failed: ${response.status}`);
+      if (!response.ok) throw new Error(`${label} failed: ${response.status}`);
       return response.json();
     }
 
-    async function submitOrder(payload) {
-      const response = await fetch(apiUrl('/api/orders'), {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        credentials: 'same-origin',
-        body: JSON.stringify(payload),
-      });
-      return Object.freeze({ok: response.ok, status: response.status, data: await response.json()});
-    }
+    const loadTradingStatus = () => get('/api/trading/status', 'trading status');
+    const loadPortfolio = () => get('/api/portfolio', 'portfolio');
+    const loadOrders = (limit = 50) => get(
+      `/api/orders?limit=${encodeURIComponent(limit)}`,
+      'order history',
+    );
+    const loadAudit = (limit = 80) => get(
+      `/api/audit?limit=${encodeURIComponent(limit)}`,
+      'audit history',
+    );
 
-    async function refreshResearch() {
-      const response = await fetch(apiUrl('/api/research/refresh'), {
-        method: 'POST',
-        credentials: 'same-origin',
-      });
-      if (!response.ok) throw new Error(`research refresh failed: ${response.status}`);
-      return response.json();
-    }
-
-    return Object.freeze({loadOrders, submitOrder, refreshResearch});
+    return Object.freeze({
+      loadTradingStatus,
+      loadPortfolio,
+      loadOrders,
+      loadAudit,
+    });
   }
 
   global.ObservatoryBackendActions = Object.freeze({create});
