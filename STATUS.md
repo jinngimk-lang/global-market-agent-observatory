@@ -77,8 +77,13 @@ Live execution is a first-class capability but remains disabled by default. Brok
 - Updated/revised bars update history but do not create a second trade decision.
 - Market-feed supervisor reconnects after stream-level failures with bounded backoff.
 - A stream-level failure while autonomous execution is enabled triggers persisted HALT; feed reconnection continues but does **not** auto-reactivate capital permission.
+- Replay feed restart resumes from the latest persisted candle time and close instead of rolling the synthetic market clock backwards.
+- Browser market streaming distinguishes transport/JSON errors from chart-render failures.
+- Browser stream handling ignores older out-of-order candles per symbol+interval rather than sending them into the chart.
 - Runtime loop status exposes running state, failure count, and last error read-only.
 - Loop failures are observable rather than silently killing a task.
+- `/api/market/coverage` independently reports per-symbol raw feed coverage as fresh/stale/missing and strategy-cycle handling as observed/waiting/error.
+- Feed coverage is derived from the persisted candle store, so a received candle and a failed strategy cycle remain distinguishable states.
 
 ### Market structure and options provenance
 
@@ -93,6 +98,9 @@ Live execution is a first-class capability but remains disabled by default. Brok
 - Structure snapshots have freshness/TTL behavior.
 - Stale or failed options data is invalidated rather than reused as if current.
 - Options-structure loop self-recovers after loop-level exceptions, records failure state, invalidates stale structure, and continues future refresh attempts.
+- `TradingCycleResult` now retains the exact market-structure snapshot that strategies actually evaluated, including observation time, market source, reference price, and methodology/provenance.
+- `/api/market/structure` exposes that exact strategy-used structure read-only instead of recomputing a potentially different view after the fact.
+- Missing structure values stay null/`missing`; the API does not convert absent OFI/options data into zero.
 
 ### Strategies and portfolio allocation
 
@@ -126,18 +134,22 @@ Live execution is a first-class capability but remains disabled by default. Brok
 
 The old Observatory-style homepage has been replaced with a focused autonomous-trading console.
 
-The homepage now answers five questions directly:
+The homepage now answers these questions directly:
 
-1. What is the system seeing?
-2. What did each strategy decide?
-3. Why did it decide that?
-4. Did portfolio/risk permit an order?
-5. What actually happened at execution/runtime level?
+1. Is each configured symbol actually receiving fresh market candles?
+2. Did the strategy cycle successfully process the observation?
+3. What exact market structure did the strategies see?
+4. What did each strategy decide and why?
+5. Did portfolio/risk permit an order?
+6. What actually happened at execution/runtime level?
 
 Visible panels now focus on:
 
 - system conclusion and execution/promotion state;
 - per-symbol decision cards;
+- separate `FEED FRESH / FEED STALE / FEED MISSING` and `OBSERVED / WAITING / CYCLE ERROR` state;
+- exact strategy-used VWAP / OFI / Put Wall estimate / Call Wall estimate / Net GEX Proxy values;
+- structure freshness and provenance, with missing values shown as `未观测` rather than zero;
 - strategy action, confidence, rationale, invalidation, allocation, execution result, and current position context;
 - compact market chart for the selected symbol;
 - append-only decision-chain/audit timeline;
@@ -157,7 +169,7 @@ Removed from the main frontend as unrelated clutter:
 
 The browser backend adapter used by the console is read-only (GET-only). The static observe-only build excludes this adapter entirely.
 
-Important truthfulness behavior: with the default replay configuration (`BTCUSDT`) while the configured trading universe is `NVDA / SPCX / KLAC`, the page explicitly warns that those stocks do not yet have live market cycles. A moving replay chart must never be presented as proof that the three-stock autonomous system is actively trading.
+Important truthfulness behavior: a moving replay chart is never presented as proof that `NVDA / SPCX / KLAC` have corresponding live market cycles. Feed coverage and market-structure availability are displayed independently for each symbol.
 
 ## Current strategy reframes
 
@@ -177,9 +189,9 @@ Important truthfulness behavior: with the default replay configuration (`BTCUSDT
 
 ## Verification state
 
-Draft PR `#8` is active.
+Draft PR `#8` is active and remains draft.
 
-Latest relevant full verification: GitHub Actions CI `#284` on 2026-08-24 completed green for the autonomous-trading-console / resilient-loop head before this documentation-only status update.
+Latest relevant full verification: GitHub Actions CI `#352` on 2026-08-24 completed green for the market-truth / market-coverage console head.
 
 Verified green in that run:
 
@@ -189,32 +201,35 @@ Verified green in that run:
 - application `compileall`;
 - required engineering-skill check;
 - Docker container build;
-- new dashboard contract tests;
-- static observe-only build safety tests;
-- market-feed reconnect + fail-closed HALT behavior.
+- replay restart monotonic-time regression tests;
+- browser invalid-stream/render-error/out-of-order regression tests;
+- exact strategy-used market-structure contract tests;
+- provenance-aware `/api/market/structure` API tests;
+- per-symbol `/api/market/coverage` fresh/stale/missing tests;
+- read-only browser adapter contract tests;
+- frontend truthfulness contract for structure, coverage, and cycle state.
 
-A separate container-side clone/browser verification could not be performed because that execution environment had no external DNS access. Do not claim browser E2E verification from that failed environment probe.
+A separate local browser session against the user's real Alpaca credentials has not been executed from this environment. Do not claim real Alpaca end-to-end verification until actual credentials/runtime evidence exist outside Git.
 
 ## Immediate next steps
 
-1. Run the new console against actual Alpaca multi-symbol stock market data for `NVDA / SPCX / KLAC` in monitor-only/paper-safe configuration and verify real decision cards end-to-end.
-2. Expose verified market-structure facts (VWAP, Put Wall, Call Wall, net GEX/proxy, order-flow value, freshness, provenance) in a dedicated read-only status payload so the frontend can show exact structure values rather than only strategy rationale codes.
-3. Expand replay/walk-forward/OOS evidence generation and promotion metrics with realistic costs, latency, and regime segmentation.
-4. Add strategy attribution/degradation diagnostics by symbol/regime so one weak regime does not hide inside aggregate expectancy.
-5. Add authenticated operator controls for explicit HALT/reactivation; no unauthenticated live-control writes.
-6. Integrate dark-pool/off-exchange evidence only after source, classification methodology, and reporting latency are explicit.
-7. Continue replay -> paper -> broker-paper -> live promotion only from recorded evidence.
-8. Keep PR #8 draft until evidence and operational readiness justify merge/readiness.
+1. Expand replay/walk-forward/OOS evidence generation and promotion metrics with held-out partitions, realistic costs/latency, provenance, and regime segmentation.
+2. Add strategy attribution/degradation diagnostics by symbol/regime so one weak regime does not hide inside aggregate expectancy.
+3. Run the console against actual Alpaca multi-symbol stock market data for `NVDA / SPCX / KLAC` in monitor-only/paper-safe configuration and verify source/coverage/decision cards end-to-end when credentials are available locally.
+4. Add authenticated operator controls for explicit HALT/reactivation; no unauthenticated live-control writes.
+5. Integrate dark-pool/off-exchange evidence only after source, classification methodology, and reporting latency are explicit.
+6. Continue replay -> paper -> broker-paper -> live promotion only from recorded evidence.
+7. Keep PR #8 draft until evidence and operational readiness justify merge/readiness.
 
 ## Known blockers / intentionally unfinished work
 
 - No current strategy is approved for autonomous live capital.
 - Real broker credentials are never stored in Git and are not part of the branch.
+- Real Alpaca end-to-end market coverage for `NVDA / SPCX / KLAC` has not been verified from this execution environment.
 - Dark-pool/off-exchange evidence is not yet integrated.
 - Strategy walk-forward/OOS evidence is not yet sufficient for live promotion.
 - Authenticated operator write APIs for controlled reactivation are not implemented.
-- The frontend does not yet expose exact live Put Wall / Call Wall / GEX / OFI numeric structure because the current trading-status response mainly exposes decisions, health, loops, and cycles; adding a provenance-aware read-only structure payload is a next step.
-- Default local `.env` remains replay-oriented; seeing a moving chart is not equivalent to receiving real `NVDA / SPCX / KLAC` market data.
+- Default local `.env` may remain replay-oriented; seeing a moving chart is not equivalent to receiving real stock market data.
 
 ## Rule for future agents
 
