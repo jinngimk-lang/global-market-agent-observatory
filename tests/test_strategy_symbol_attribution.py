@@ -5,7 +5,11 @@ from decimal import Decimal
 
 from app.domain.models import TradingMode
 from app.innovation.store import SQLiteStrategyEvidenceStore
-from app.learning.models import StrategyObservation, StrategyObservationStatus
+from app.learning.models import (
+    StrategyHealthPolicy,
+    StrategyObservation,
+    StrategyObservationStatus,
+)
 from app.learning.service import StrategyLearningService
 from app.learning.store import SQLiteStrategyLearningStore
 from app.strategy.base import StrategyAction
@@ -31,6 +35,15 @@ def closed_observation(index: int, symbol: str, net_return: str) -> StrategyObse
     )
 
 
+def policy(min_observations: int) -> StrategyHealthPolicy:
+    return StrategyHealthPolicy(
+        min_observations=min_observations,
+        window_observations=20,
+        min_expectancy_after_costs=Decimal("0"),
+        max_drawdown=Decimal("0.25"),
+    )
+
+
 def test_symbol_degradation_cannot_hide_inside_aggregate_expectancy(tmp_path) -> None:
     learning_store = SQLiteStrategyLearningStore(tmp_path / "learning.db")
     service = StrategyLearningService(
@@ -39,15 +52,9 @@ def test_symbol_degradation_cannot_hide_inside_aggregate_expectancy(tmp_path) ->
         mode=TradingMode.REPLAY,
         evaluation_horizon_seconds=60,
         transaction_cost_bps=Decimal("0"),
-        health_policy={
-            "min_observations": 2,
-            "window_observations": 20,
-            "min_expectancy_after_costs": Decimal("0"),
-            "max_drawdown": Decimal("0.25"),
-        },
+        health_policy=policy(2),
     )
 
-    # Aggregate expectancy is strongly positive because NVDA wins dominate.
     for index, value in enumerate(["0.30", "0.30", "0.30", "0.30"]):
         learning_store.add_observation(closed_observation(index, "NVDA", value))
     learning_store.add_observation(closed_observation(10, "KLAC", "-0.10"))
@@ -74,12 +81,7 @@ def test_symbol_attribution_respects_minimum_sample_size(tmp_path) -> None:
         mode=TradingMode.REPLAY,
         evaluation_horizon_seconds=60,
         transaction_cost_bps=Decimal("0"),
-        health_policy={
-            "min_observations": 3,
-            "window_observations": 20,
-            "min_expectancy_after_costs": Decimal("0"),
-            "max_drawdown": Decimal("0.25"),
-        },
+        health_policy=policy(3),
     )
     learning_store.add_observation(closed_observation(0, "KLAC", "-0.50"))
 
