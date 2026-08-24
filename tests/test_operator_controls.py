@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from pydantic import SecretStr
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
 from app.api.main import create_app
 from app.domain.models import TradingState
