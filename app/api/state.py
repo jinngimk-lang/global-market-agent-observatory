@@ -11,6 +11,7 @@ from app.broker.factory import build_account_observers
 from app.broker.paper import PaperBroker
 from app.domain.models import ExternalAccountSnapshot, RiskLimits, TradingState
 from app.execution.controller import ExecutionController
+from app.innovation.gate import PromotionPolicy
 from app.innovation.registry import RuntimeStrategyPromotion, StrategyPromotionRegistry
 from app.innovation.store import SQLiteStrategyEvidenceStore
 from app.learning.models import StrategyHealth, StrategyHealthPolicy
@@ -105,6 +106,12 @@ class ApplicationState:
         self.strategy_promotion = StrategyPromotionRegistry(
             manifests=strategy_hypotheses(),
             evidence_store=self.strategy_evidence_store,
+            promotion_policy=PromotionPolicy(
+                min_oos_holdout_observations=(
+                    settings.strategy_oos_min_holdout_observations
+                ),
+                min_walk_forward_folds=settings.strategy_oos_min_completed_folds,
+            ),
         )
         self.strategy_promotion_reports: list[RuntimeStrategyPromotion] = (
             self.strategy_promotion.evaluate_runtime(
@@ -129,6 +136,16 @@ class ApplicationState:
                 ),
                 max_drawdown=settings.strategy_degradation_max_drawdown,
             ),
+            walk_forward_calibration_observations=(
+                settings.strategy_walk_forward_calibration_observations
+            ),
+            walk_forward_holdout_observations=(
+                settings.strategy_walk_forward_holdout_observations
+            ),
+            oos_min_holdout_observations=(
+                settings.strategy_oos_min_holdout_observations
+            ),
+            oos_min_completed_folds=settings.strategy_oos_min_completed_folds,
         )
         self.strategy_health_reports: list[StrategyHealth] = []
         self.strategy_health_execution_allowed = True
