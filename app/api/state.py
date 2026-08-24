@@ -336,6 +336,13 @@ class ApplicationState:
             except Exception as exc:
                 self.market_feed_failure_count += 1
                 self.last_market_feed_error = f"{type(exc).__name__}: {exc}"
+                if (
+                    self.autonomous_execution_enabled
+                    and self.trading_state is not TradingState.HALTED
+                ):
+                    self.orchestrator.halt(
+                        f"market_feed_error: {self.last_market_feed_error}"
+                    )
                 await asyncio.sleep(retry_seconds)
                 retry_seconds = min(
                     self.settings.market_feed_retry_max_seconds,
