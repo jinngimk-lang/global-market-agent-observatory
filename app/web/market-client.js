@@ -119,15 +119,20 @@
     const symbol = runtime.market.symbol;
     const interval = runtime.market.interval;
 
-    async function loadHistory() {
+    async function loadHistory(requestedSymbol = symbol, requestedInterval = interval) {
+      const targetSymbol = String(requestedSymbol || symbol).trim().toUpperCase();
+      const targetInterval = String(requestedInterval || interval).trim() || interval;
+
       if (runtime.mode === 'backend') {
         const response = await fetch(
-          `${runtime.apiBase}/api/candles/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(interval)}&limit=500`,
+          `${runtime.apiBase}/api/candles/${encodeURIComponent(targetSymbol)}?interval=${encodeURIComponent(targetInterval)}&limit=500`,
           {credentials: 'same-origin'},
         );
         if (!response.ok) throw new Error(`backend history failed: ${response.status}`);
         return response.json();
       }
+
+      if (targetSymbol !== symbol || targetInterval !== interval) return [];
 
       try {
         const query = new URLSearchParams({symbol, interval, limit: '500'});
@@ -208,7 +213,10 @@
             const candle = runtime.mode === 'backend'
               ? (payload.type === 'candle' ? payload.data : null)
               : (payload.k ? normalizeBinanceStream(symbol, interval, payload) : null);
-            if (candle && candle.symbol === symbol) onCandle(candle);
+            if (candle) {
+              if (runtime.mode === 'backend') onCandle(candle);
+              else if (candle.symbol === symbol) onCandle(candle);
+            }
           } catch (_) {
             onStatus({state: 'degraded', label: 'INVALID STREAM DATA'});
           }
