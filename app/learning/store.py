@@ -5,7 +5,11 @@ from datetime import datetime
 from pathlib import Path
 
 from app.domain.models import TradingMode
-from app.learning.models import StrategyHealth, StrategyObservation
+from app.learning.models import (
+    StrategyEvaluationPartition,
+    StrategyHealth,
+    StrategyObservation,
+)
 
 
 class SQLiteStrategyLearningStore:
@@ -122,17 +126,12 @@ class SQLiteStrategyLearningStore:
             rows = connection.execute(query, tuple(values)).fetchall()
         return [StrategyObservation.model_validate_json(row["payload"]) for row in rows]
 
-    def count_observations(self, strategy_id: str, version: str) -> int:
-        with self._connect() as connection:
-            row = connection.execute(
-                """
-                SELECT COUNT(*) AS count
-                FROM strategy_learning_observations
-                WHERE strategy_id = ? AND version = ?
-                """,
-                (strategy_id.strip().lower(), version.strip()),
-            ).fetchone()
-        return int(row["count"]) if row is not None else 0
+    def count_walk_forward_observations(self, strategy_id: str, version: str) -> int:
+        return sum(
+            1
+            for observation in self.list_observations(strategy_id, version)
+            if observation.evaluation_partition is not StrategyEvaluationPartition.UNASSIGNED
+        )
 
     def count_closed_by_mode(self, strategy_id: str, version: str) -> dict[TradingMode, int]:
         with self._connect() as connection:
