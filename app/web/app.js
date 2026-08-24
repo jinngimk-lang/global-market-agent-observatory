@@ -10,6 +10,7 @@ const state = {
   interval: runtime.market.interval,
   disconnectMarket: null,
   tradingStatus: null,
+  marketStructure: {generated_at: null, symbols: {}},
   portfolio: null,
   orders: [],
   audit: [],
@@ -61,6 +62,28 @@ const observeStatus = () => ({
   runtime_loops: {},
 });
 
+const observeMarketStructure = () => ({
+  generated_at: null,
+  symbols: {
+    [runtime.market.symbol]: {
+      status: 'missing',
+      symbol: runtime.market.symbol,
+      market_source: null,
+      latest_price: null,
+      observed_at: null,
+      market_data_stale: true,
+      options_structure_stale: true,
+      availability: {
+        vwap: false,
+        order_flow_imbalance: false,
+        options_structure: false,
+      },
+      structure: null,
+      provenance: {},
+    },
+  },
+});
+
 const observePortfolio = () => ({
   equity: 0,
   cash: 0,
@@ -92,11 +115,12 @@ async function fetchBackendHistory(symbol) {
 
 async function readBackendSnapshot() {
   if (runtime.mode !== 'backend' || !backendActions) {
-    return [observeStatus(), observePortfolio(), [], []];
+    return [observeStatus(), observeMarketStructure(), observePortfolio(), [], []];
   }
   try {
     return await Promise.all([
       backendActions.loadTradingStatus(),
+      backendActions.loadMarketStructure(),
       backendActions.loadPortfolio(),
       backendActions.loadOrders(50),
       backendActions.loadAudit(80),
@@ -105,6 +129,7 @@ async function readBackendSnapshot() {
     console.error('failed to refresh trading dashboard', error);
     return [
       state.tradingStatus || observeStatus(),
+      state.marketStructure || observeMarketStructure(),
       state.portfolio || observePortfolio(),
       state.orders || [],
       state.audit || [],
@@ -216,6 +241,81 @@ function actionableSignal(signals) {
   return signals.find((signal) => signal.action !== 'hold') || signals[0] || null;
 }
 
+function structureStatusFor(symbol) {
+  return state.marketStructure?.symbols?.[symbol] || null;
+}
+
+function observedValue(value, digits = 4) {
+  if (value == null || value === '') return '未观测';
+  return number(value, digits);
+}
+
+function observedPrice(value) {
+  if (value == null || value === '') return '未观测';
+  return `$${money(value)}`;
+}
+
+function structureFreshness(item) {
+  if (!item || item.status !== 'observed') return '未观测';
+  if (item.market_data_stale) return 'MARKET STALE';
+  if (item.availability?.options_structure && item.options_structure_stale) {
+    return 'OPTIONS STALE';
+  }
+  return 'FRESH';
+}
+
+function appendMarketStructureFacts(card, symbol) {
+  const item = structureStatusFor(symbol);
+  const structure = item?.structure || null;
+  const facts = document.createElement('div');
+  facts.className = 'decision-facts structure-facts';
+  const values = [
+    ['VWAP', observedPrice(structure?.vwap)],
+    ['OFI', observedValue(structure?.order_flow_imbalance, 4)],
+    ['Put Wall 估算', observedPrice(structure?.put_wall)],
+    ['Call Wall 估算', observedPrice(structure?.call_wall)],
+    ['Net GEX Proxy', observedValue(structure?.net_gex_1pct, 0)],
+    ['结构新鲜度', structureFreshness(item)],
+  ];
+  for (const [label, value] of values) {
+    const fact = document.createElement('div');
+    const labelNode = document.createElement('span');
+    labelNode.textContent = label;
+    const valueNode = document.createElement('strong');
+    valueNode.textContent = value;
+    fact.append(labelNode, valueNode);
+    facts.appendChild(fact);
+  }
+  card.appendChild(facts);
+
+  if (!item || item.status !== 'observed') {
+    const warning = document.createElement('div');
+    warning.className = 'truth-warning';
+    warning.textContent = '该标的市场结构尚未观测；不会把缺失值显示成 0。';
+    card.appendChild(warning);
+    return;
+  }
+
+  const provenance = item.provenance || {};
+  const source = document.createElement('div');
+  source.className = 'source-context';
+  const optionsSource = provenance.options_provider
+    ? ` · Options ${provenance.options_provider}${provenance.options_feed ? `/${provenance.options_feed}` : ''}`
+    : '';
+  source.textContent = `结构来源：${item.market_source || provenance.market_source || '—'}${optionsSource} · observed ${item.observed_at || '—'}`;
+  card.appendChild(source);
+
+  const freshness = structureFreshness(item);
+  if (freshness !== 'FRESH') {
+    const warning = document.createElement('div');
+    warning.className = 'truth-warning';
+    warning.textContent = freshness === 'MARKET STALE'
+      ? '行情结构已过期；当前数值仅保留为历史观察，不应视为新的交易依据。'
+      : '期权结构已过期；Wall / GEX Proxy 仅保留为历史观察。';
+    card.appendChild(warning);
+  }
+}
+
 function renderSystemSummary(status) {
   const summary = document.getElementById('system-summary');
   summary.replaceChildren();
@@ -314,6 +414,7 @@ function renderDecisionCards(status) {
 
   for (const symbol of universe) {
     const cycle = status.last_cycles?.[symbol];
+    const structureStatus = structureStatusFor(symbol);
     const signals = cycle?.signals || [];
     const action = aggregateAction(signals);
     const primary = actionableSignal(signals);
@@ -330,13 +431,17 @@ function renderDecisionCards(status) {
     const price = document.createElement('span');
     price.textContent = position
       ? `$${money(position.market_price)}`
-      : primary?.entry_price != null ? `$${money(primary.entry_price)}` : '暂无价格';
+      : structureStatus?.latest_price != null
+        ? `$${money(structureStatus.latest_price)}`
+        : primary?.entry_price != null ? `$${money(primary.entry_price)}` : '暂无价格';
     symbolBlock.append(symbolName, price);
     const badge = document.createElement('span');
     badge.className = `decision-action ${toneForAction(action)}`;
     badge.textContent = action.toUpperCase();
     header.append(symbolBlock, badge);
     card.appendChild(header);
+
+    appendMarketStructureFacts(card, symbol);
 
     if (!cycle) {
       const empty = document.createElement('p');
@@ -651,8 +756,9 @@ function renderRuntimeLoops(status) {
 }
 
 async function refreshAll() {
-  const [status, portfolio, orders, audit] = await readBackendSnapshot();
+  const [status, marketStructure, portfolio, orders, audit] = await readBackendSnapshot();
   state.tradingStatus = status;
+  state.marketStructure = marketStructure;
   state.portfolio = portfolio;
   state.orders = orders;
   state.audit = audit;
