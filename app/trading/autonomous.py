@@ -22,6 +22,10 @@ class TradingCycleResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     symbol: str
+    observed_at: datetime | None = None
+    market_source: str | None = None
+    reference_price: Decimal | None = None
+    structure: MarketStructureSnapshot | None = None
     signals: list[StrategySignal] = Field(default_factory=list)
     allocations: list[AllocationDecision] = Field(default_factory=list)
     executions: list[ExecutionResult] = Field(default_factory=list)
@@ -48,10 +52,20 @@ class AutonomousTradingEngine:
         self._orchestrator = orchestrator
         self._audit = audit
         self._execution_enabled = execution_enabled
+        self._latest_structure_results: dict[str, TradingCycleResult] = {}
 
     @property
     def execution_enabled(self) -> bool:
         return self._execution_enabled
+
+    @property
+    def latest_structure_results(self) -> dict[str, TradingCycleResult]:
+        return dict(self._latest_structure_results)
+
+    def _record_structure_result(self, result: TradingCycleResult) -> TradingCycleResult:
+        if result.structure is not None:
+            self._latest_structure_results[result.symbol] = result
+        return result
 
     async def on_candle(
         self,
@@ -66,12 +80,18 @@ class AutonomousTradingEngine:
             self._store.upsert_candle(candle)
             return TradingCycleResult(
                 symbol=candle.symbol,
+                observed_at=candle.close_time,
+                market_source=candle.source,
+                reference_price=Decimal(str(candle.close)),
                 skipped_reason="market_revision",
             )
 
         if self._cycle_store.is_completed(candle):
             return TradingCycleResult(
                 symbol=candle.symbol,
+                observed_at=candle.close_time,
+                market_source=candle.source,
+                reference_price=Decimal(str(candle.close)),
                 skipped_reason="cycle_already_completed",
             )
 
@@ -83,9 +103,20 @@ class AutonomousTradingEngine:
         )
         level = vwap(candles)
         if structure is None:
-            structure = MarketStructureSnapshot(symbol=candle.symbol, vwap=level)
+            structure = MarketStructureSnapshot(
+                symbol=candle.symbol,
+                vwap=level,
+                methodology={"vwap": "typical-price-volume:last-200-candles"},
+            )
         else:
-            structure = structure.model_copy(update={"vwap": level})
+            methodology = dict(structure.methodology)
+            methodology["vwap"] = "typical-price-volume:last-200-candles"
+            structure = structure.model_copy(
+                update={
+                    "vwap": level,
+                    "methodology": methodology,
+                }
+            )
 
         previous = Decimal(str(candles[-2].close)) if len(candles) >= 2 else None
         market = StrategyInput(
@@ -116,7 +147,16 @@ class AutonomousTradingEngine:
         ]
         if not actionable:
             self._cycle_store.mark_completed(candle)
-            return TradingCycleResult(symbol=candle.symbol, signals=signals)
+            return self._record_structure_result(
+                TradingCycleResult(
+                    symbol=candle.symbol,
+                    observed_at=candle.close_time,
+                    market_source=candle.source,
+                    reference_price=Decimal(str(candle.close)),
+                    structure=structure,
+                    signals=signals,
+                )
+            )
 
         state = await self._portfolio_source.snapshot()
         allocations = self._allocator.allocate(signals, state.portfolio)
@@ -169,9 +209,15 @@ class AutonomousTradingEngine:
         if not any(result.status is OrderStatus.UNKNOWN for result in executions):
             self._cycle_store.mark_completed(candle)
 
-        return TradingCycleResult(
-            symbol=candle.symbol,
-            signals=signals,
-            allocations=allocations,
-            executions=executions,
+        return self._record_structure_result(
+            TradingCycleResult(
+                symbol=candle.symbol,
+                observed_at=candle.close_time,
+                market_source=candle.source,
+                reference_price=Decimal(str(candle.close)),
+                structure=structure,
+                signals=signals,
+                allocations=allocations,
+                executions=executions,
+            )
         )
