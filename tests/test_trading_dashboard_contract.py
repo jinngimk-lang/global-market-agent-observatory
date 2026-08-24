@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "app" / "web" / "index.html"
 APP_JS = ROOT / "app" / "web" / "app.js"
 BACKEND_JS = ROOT / "app" / "web" / "backend-actions.js"
+ATTRIBUTION_JS = ROOT / "app" / "web" / "strategy-health-attribution.js"
 
 
 def test_dashboard_focuses_on_autonomous_trading_decisions() -> None:
@@ -19,11 +20,14 @@ def test_dashboard_focuses_on_autonomous_trading_decisions() -> None:
         "positions-body",
         "executions-body",
         "strategy-health-body",
+        "strategy-symbol-attribution",
         "runtime-loops",
         "chart",
     ]
     for element_id in required_ids:
         assert f'id="{element_id}"' in html
+
+    assert "/static/strategy-health-attribution.js" in html
 
     for removed in [
         "order-form",
@@ -39,6 +43,7 @@ def test_dashboard_focuses_on_autonomous_trading_decisions() -> None:
 def test_dashboard_reads_only_trading_decision_structure_coverage_and_audit_data() -> None:
     source = APP_JS.read_text(encoding="utf-8")
     backend = BACKEND_JS.read_text(encoding="utf-8")
+    attribution = ATTRIBUTION_JS.read_text(encoding="utf-8")
 
     assert "ObservatoryBackendActions?.create(runtime)" in source
     assert "renderDecisionCards" in source
@@ -84,9 +89,11 @@ def test_dashboard_reads_only_trading_decision_structure_coverage_and_audit_data
         "回撤",
         "DEGRADED",
     ]:
-        assert attribution_truth in source
+        assert attribution_truth in attribution
 
+    assert "/api/trading/status" in attribution
     assert "method: 'POST'" not in backend
+    assert "method: 'POST'" not in attribution
     for removed_endpoint in [
         "/api/research/crisis-winners",
         "/api/research/partnerships",
@@ -95,3 +102,4 @@ def test_dashboard_reads_only_trading_decision_structure_coverage_and_audit_data
     ]:
         assert removed_endpoint not in source
         assert removed_endpoint not in backend
+        assert removed_endpoint not in attribution
