@@ -8,6 +8,7 @@ from app.domain.models import Candle, TradingMode
 from app.innovation.models import PromotionEvidence
 from app.innovation.store import SQLiteStrategyEvidenceStore
 from app.learning.models import (
+    StrategyEvaluationPartition,
     StrategyHealth,
     StrategyHealthPolicy,
     StrategyObservation,
@@ -28,17 +29,27 @@ class StrategyLearningService:
         evaluation_horizon_seconds: float,
         transaction_cost_bps: Decimal,
         health_policy: StrategyHealthPolicy | None = None,
+        walk_forward_calibration_observations: int = 20,
+        walk_forward_holdout_observations: int = 10,
     ) -> None:
         if evaluation_horizon_seconds <= 0:
             raise ValueError("evaluation_horizon_seconds must be positive")
         if transaction_cost_bps < 0:
             raise ValueError("transaction_cost_bps must be non-negative")
+        if walk_forward_calibration_observations <= 0:
+            raise ValueError("walk_forward_calibration_observations must be positive")
+        if walk_forward_holdout_observations <= 0:
+            raise ValueError("walk_forward_holdout_observations must be positive")
         self._store = store
         self._evidence_store = evidence_store
         self._mode = mode
         self._horizon_seconds = evaluation_horizon_seconds
         self._transaction_cost_bps = transaction_cost_bps
         self._policy = health_policy or StrategyHealthPolicy()
+        self._walk_forward_calibration_observations = (
+            walk_forward_calibration_observations
+        )
+        self._walk_forward_holdout_observations = walk_forward_holdout_observations
 
     @property
     def store(self) -> SQLiteStrategyLearningStore:
@@ -128,20 +139,22 @@ class StrategyLearningService:
         entry_price: Decimal,
     ) -> StrategyObservation:
         normalized_id = signal.strategy_id.strip().lower()
+        version = signal.version.strip()
         raw_id = "|".join(
             (
                 normalized_id,
-                signal.version.strip(),
+                version,
                 signal.symbol.strip().upper(),
                 signal.action.value,
                 signal.generated_at.isoformat(),
             )
         )
         observation_id = hashlib.sha256(raw_id.encode("utf-8")).hexdigest()
+        partition, fold = self._next_walk_forward_partition(normalized_id, version)
         return StrategyObservation(
             observation_id=observation_id,
             strategy_id=normalized_id,
-            version=signal.version.strip(),
+            version=version,
             symbol=signal.symbol.strip().upper(),
             mode=self._mode,
             action=signal.action,
@@ -149,7 +162,28 @@ class StrategyLearningService:
             observed_at=signal.generated_at,
             due_at=signal.generated_at + timedelta(seconds=self._horizon_seconds),
             transaction_cost_bps=self._transaction_cost_bps,
+            evaluation_partition=partition,
+            walk_forward_fold=fold,
         )
+
+    def _next_walk_forward_partition(
+        self,
+        strategy_id: str,
+        version: str,
+    ) -> tuple[StrategyEvaluationPartition, int]:
+        index = self._store.count_observations(strategy_id, version)
+        fold_size = (
+            self._walk_forward_calibration_observations
+            + self._walk_forward_holdout_observations
+        )
+        fold = index // fold_size
+        offset = index % fold_size
+        partition = (
+            StrategyEvaluationPartition.CALIBRATION
+            if offset < self._walk_forward_calibration_observations
+            else StrategyEvaluationPartition.HOLDOUT
+        )
+        return partition, fold
 
     @staticmethod
     def _close_observation(
