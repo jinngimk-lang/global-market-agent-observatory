@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
@@ -193,6 +194,106 @@ def create_app(
                 for symbol, cycle in sorted(runtime.last_cycle_results.items())
             },
             "cycle_errors": dict(sorted(runtime.last_cycle_errors.items())),
+        }
+
+    @app.get("/api/market/structure")
+    async def market_structure_status() -> dict:
+        generated_at = datetime.now(UTC)
+        latest = runtime.autonomous.latest_structure_results
+        symbols = sorted(set(resolved_settings.trading_universe) | set(latest))
+        payload: dict[str, dict] = {}
+
+        for symbol in symbols:
+            cycle = latest.get(symbol)
+            if (
+                cycle is None
+                or cycle.structure is None
+                or cycle.observed_at is None
+            ):
+                payload[symbol] = {
+                    "status": "missing",
+                    "symbol": symbol,
+                    "market_source": None,
+                    "latest_price": None,
+                    "observed_at": None,
+                    "market_age_seconds": None,
+                    "market_data_stale": True,
+                    "options_age_seconds": None,
+                    "options_structure_stale": True,
+                    "availability": {
+                        "vwap": False,
+                        "order_flow_imbalance": False,
+                        "options_structure": False,
+                    },
+                    "structure": None,
+                    "provenance": {},
+                }
+                continue
+
+            observed_at = cycle.observed_at
+            if observed_at.tzinfo is None:
+                observed_at = observed_at.replace(tzinfo=UTC)
+            observed_at = observed_at.astimezone(UTC)
+            market_age = max((generated_at - observed_at).total_seconds(), 0.0)
+            structure = cycle.structure
+            options_available = any(
+                value is not None
+                for value in (
+                    structure.net_gex_1pct,
+                    structure.gamma_flip,
+                    structure.call_wall,
+                    structure.put_wall,
+                )
+            )
+            provenance = dict(structure.methodology)
+            provenance["market_source"] = cycle.market_source or "unknown"
+
+            options_age: float | None = None
+            options_stale = not options_available
+            options_fetched_at = provenance.get("options_fetched_at")
+            if options_available and options_fetched_at:
+                try:
+                    parsed = datetime.fromisoformat(
+                        options_fetched_at.replace("Z", "+00:00")
+                    )
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=UTC)
+                    options_age = max(
+                        (generated_at - parsed.astimezone(UTC)).total_seconds(),
+                        0.0,
+                    )
+                    options_stale = (
+                        options_age > resolved_settings.options_structure_max_age_seconds
+                    )
+                except ValueError:
+                    options_stale = True
+
+            payload[symbol] = {
+                "status": "observed",
+                "symbol": symbol,
+                "market_source": cycle.market_source,
+                "latest_price": cycle.reference_price,
+                "observed_at": observed_at.isoformat(),
+                "market_age_seconds": market_age,
+                "market_data_stale": (
+                    market_age > resolved_settings.market_data_max_age_seconds
+                ),
+                "options_age_seconds": options_age,
+                "options_structure_stale": options_stale,
+                "availability": {
+                    "vwap": structure.vwap is not None,
+                    "order_flow_imbalance": (
+                        structure.order_flow_imbalance is not None
+                    ),
+                    "options_structure": options_available,
+                },
+                "structure": structure.model_dump(mode="json"),
+                "provenance": provenance,
+            }
+
+        return {
+            "generated_at": generated_at.isoformat(),
+            "symbols": payload,
         }
 
     @app.get("/api/candles/{symbol}")
