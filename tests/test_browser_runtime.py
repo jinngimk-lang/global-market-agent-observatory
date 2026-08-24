@@ -49,6 +49,32 @@ console.log(JSON.stringify(runtime));
     }
 
 
+def test_backend_actions_load_market_structure_read_only() -> None:
+    actions_path = json.dumps(str(ROOT / "app" / "web" / "backend-actions.js"))
+    payload = run_node(
+        f"""
+const fs = require('fs');
+const vm = require('vm');
+const requests = [];
+const fetch = async (url, options) => {{
+  requests.push({{url, method: options.method}});
+  return {{ok: true, json: async () => ({{generated_at: '2026-08-24T05:00:00Z', symbols: {{}}}})}};
+}};
+const context = vm.createContext({{window: {{}}, fetch, console}});
+vm.runInContext(fs.readFileSync({actions_path}, 'utf8'), context);
+const actions = context.window.ObservatoryBackendActions.create({{apiBase: '/backend'}});
+(async () => {{
+  const result = await actions.loadMarketStructure();
+  console.log(JSON.stringify({{requests, result}}));
+}})();
+"""
+    )
+    assert payload["requests"] == [
+        {"url": "/backend/api/market/structure", "method": "GET"}
+    ]
+    assert payload["result"]["symbols"] == {}
+
+
 def test_fallback_history_is_deterministic_and_valid_ohlc() -> None:
     client_path = json.dumps(str(ROOT / "app" / "web" / "market-client.js"))
     payload = run_node(
