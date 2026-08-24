@@ -76,6 +76,16 @@ def test_dashboard_reads_only_trading_decision_structure_coverage_and_audit_data
     ]:
         assert market_truth in source
 
+    for attribution_truth in [
+        "symbol_attribution",
+        "标的归因",
+        "样本",
+        "期望",
+        "回撤",
+        "DEGRADED",
+    ]:
+        assert attribution_truth in source
+
     assert "method: 'POST'" not in backend
     for removed_endpoint in [
         "/api/research/crisis-winners",
