@@ -65,6 +65,18 @@ class StrategyObservation(BaseModel):
     closed_at: datetime | None = None
 
 
+class StrategySymbolAttribution(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str
+    closed_observations: int = 0
+    expectancy_after_costs: Decimal | None = None
+    max_drawdown: Decimal | None = None
+    win_rate: Decimal | None = None
+    degraded: bool = False
+    degradation_reasons: list[str] = Field(default_factory=list)
+
+
 class StrategyHealth(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -76,4 +88,5 @@ class StrategyHealth(BaseModel):
     win_rate: Decimal | None = None
     degraded: bool = False
     degradation_reasons: list[str] = Field(default_factory=list)
+    symbol_attribution: list[StrategySymbolAttribution] = Field(default_factory=list)
     updated_at: datetime
