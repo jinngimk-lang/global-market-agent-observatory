@@ -38,6 +38,19 @@
       </div>
     </section>
 
+    <section class="panel symbol-panel">
+      <div class="panel-heading">
+        <div>
+          <p class="label">市场切换</p>
+          <h2>美股 / 行情标的</h2>
+        </div>
+        <span id="market-context-label" class="microcopy">正在读取交易池</span>
+      </div>
+      <div id="symbol-switcher" class="symbol-switcher" aria-label="切换行情标的">
+        <span class="symbol-empty">等待标的列表…</span>
+      </div>
+    </section>
+
     <section class="panel decisions-panel">
       <div class="panel-heading">
         <div>
@@ -156,5 +169,6 @@
   <script src="/static/market-client.js"></script>
   <script src="/static/backend-actions.js"></script>
   <script src="/static/app.js" defer></script>
+  <script src="/static/symbol-switcher.js" defer></script>
 </body>
 </html>
