@@ -4,10 +4,11 @@ import hashlib
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from app.domain.models import Candle, TradingMode
+from app.domain.models import Candle, OrderStatus, TradingMode
 from app.innovation.models import PromotionEvidence
 from app.innovation.store import SQLiteStrategyEvidenceStore
 from app.learning.models import (
+    StrategyEntryPriceSource,
     StrategyEvaluationPartition,
     StrategyHealth,
     StrategyHealthPolicy,
@@ -31,6 +32,8 @@ class StrategyLearningService:
         mode: TradingMode,
         evaluation_horizon_seconds: float,
         transaction_cost_bps: Decimal,
+        modeled_entry_slippage_bps: Decimal = Decimal("0"),
+        modeled_exit_slippage_bps: Decimal = Decimal("0"),
         health_policy: StrategyHealthPolicy | None = None,
         walk_forward_calibration_observations: int = 20,
         walk_forward_holdout_observations: int = 10,
@@ -41,6 +44,8 @@ class StrategyLearningService:
             raise ValueError("evaluation_horizon_seconds must be positive")
         if transaction_cost_bps < 0:
             raise ValueError("transaction_cost_bps must be non-negative")
+        if modeled_entry_slippage_bps < 0 or modeled_exit_slippage_bps < 0:
+            raise ValueError("modeled slippage bps must be non-negative")
         if walk_forward_calibration_observations <= 0:
             raise ValueError("walk_forward_calibration_observations must be positive")
         if walk_forward_holdout_observations <= 0:
@@ -54,6 +59,8 @@ class StrategyLearningService:
         self._mode = mode
         self._horizon_seconds = evaluation_horizon_seconds
         self._transaction_cost_bps = transaction_cost_bps
+        self._modeled_entry_slippage_bps = modeled_entry_slippage_bps
+        self._modeled_exit_slippage_bps = modeled_exit_slippage_bps
         self._policy = health_policy or StrategyHealthPolicy()
         self._walk_forward_calibration_observations = (
             walk_forward_calibration_observations
@@ -77,11 +84,17 @@ class StrategyLearningService:
         for signal in cycle.signals:
             if signal.action not in {StrategyAction.BUY, StrategyAction.SELL}:
                 continue
-            entry_price = signal.entry_price or exit_price
-            if entry_price <= 0:
+            signal_entry_price = signal.entry_price or exit_price
+            if signal_entry_price <= 0:
                 continue
-            observation = self._observation_from_signal(signal, entry_price).model_copy(
-                update={"market_regime": self._market_regime(cycle, entry_price)}
+            observation = self._observation_from_signal(
+                signal,
+                signal_entry_price,
+                cycle,
+            ).model_copy(
+                update={
+                    "market_regime": self._market_regime(cycle, signal_entry_price)
+                }
             )
             self._store.add_observation(observation)
             affected.add((observation.strategy_id, observation.version))
@@ -240,7 +253,8 @@ class StrategyLearningService:
     def _observation_from_signal(
         self,
         signal: StrategySignal,
-        entry_price: Decimal,
+        signal_entry_price: Decimal,
+        cycle: TradingCycleResult,
     ) -> StrategyObservation:
         normalized_id = signal.strategy_id.strip().lower()
         version = signal.version.strip()
@@ -255,6 +269,33 @@ class StrategyLearningService:
         )
         observation_id = hashlib.sha256(raw_id.encode("utf-8")).hexdigest()
         partition, fold = self._next_walk_forward_partition(normalized_id, version)
+        observed_fill = self._matching_observed_fill(signal, cycle)
+        if observed_fill is None:
+            entry_price = self._adverse_price(
+                signal_entry_price,
+                signal.action,
+                self._modeled_entry_slippage_bps,
+                is_entry=True,
+            )
+            entry_source = StrategyEntryPriceSource.MODELED
+            observed_slippage = None
+            latency_seconds = None
+            execution_client_order_id = None
+        else:
+            entry_price = observed_fill.filled_price
+            assert entry_price is not None
+            entry_source = StrategyEntryPriceSource.OBSERVED_FILL
+            observed_slippage = self._observed_entry_slippage_bps(
+                signal.action,
+                signal_entry_price,
+                entry_price,
+            )
+            latency_seconds = self._execution_latency_seconds(
+                signal.generated_at,
+                observed_fill.observed_at,
+            )
+            execution_client_order_id = observed_fill.client_order_id
+
         return StrategyObservation(
             observation_id=observation_id,
             strategy_id=normalized_id,
@@ -262,13 +303,87 @@ class StrategyLearningService:
             symbol=signal.symbol.strip().upper(),
             mode=self._mode,
             action=signal.action,
+            signal_entry_price=signal_entry_price,
             entry_price=entry_price,
+            entry_price_source=entry_source,
+            modeled_entry_slippage_bps=self._modeled_entry_slippage_bps,
+            modeled_exit_slippage_bps=self._modeled_exit_slippage_bps,
+            observed_entry_slippage_bps=observed_slippage,
+            execution_latency_seconds=latency_seconds,
+            execution_client_order_id=execution_client_order_id,
             observed_at=signal.generated_at,
             due_at=signal.generated_at + timedelta(seconds=self._horizon_seconds),
             transaction_cost_bps=self._transaction_cost_bps,
             evaluation_partition=partition,
             walk_forward_fold=fold,
         )
+
+    @staticmethod
+    def _same_signal(left: StrategySignal, right: StrategySignal) -> bool:
+        return (
+            left.strategy_id.strip().lower() == right.strategy_id.strip().lower()
+            and left.version.strip() == right.version.strip()
+            and left.symbol.strip().upper() == right.symbol.strip().upper()
+            and left.action is right.action
+            and left.generated_at == right.generated_at
+        )
+
+    @classmethod
+    def _matching_observed_fill(cls, signal: StrategySignal, cycle: TradingCycleResult):
+        client_order_ids = {
+            allocation.intent.client_order_id
+            for allocation in cycle.allocations
+            if allocation.intent is not None and cls._same_signal(allocation.signal, signal)
+        }
+        if not client_order_ids:
+            return None
+        for execution in cycle.executions:
+            if (
+                execution.client_order_id in client_order_ids
+                and execution.status is OrderStatus.FILLED
+                and execution.filled_price is not None
+                and execution.filled_price > 0
+                and execution.filled_quantity > 0
+            ):
+                return execution
+        return None
+
+    @staticmethod
+    def _observed_entry_slippage_bps(
+        action: StrategyAction,
+        reference_price: Decimal,
+        fill_price: Decimal,
+    ) -> Decimal:
+        if action is StrategyAction.BUY:
+            adverse_move = fill_price - reference_price
+        else:
+            adverse_move = reference_price - fill_price
+        return adverse_move / reference_price * Decimal("10000")
+
+    @staticmethod
+    def _execution_latency_seconds(generated_at: datetime, observed_at: datetime) -> Decimal:
+        generated = generated_at if generated_at.tzinfo is not None else generated_at.replace(tzinfo=UTC)
+        observed = observed_at if observed_at.tzinfo is not None else observed_at.replace(tzinfo=UTC)
+        seconds = max(
+            (observed.astimezone(UTC) - generated.astimezone(UTC)).total_seconds(),
+            0.0,
+        )
+        return Decimal(str(seconds))
+
+    @staticmethod
+    def _adverse_price(
+        price: Decimal,
+        action: StrategyAction,
+        slippage_bps: Decimal,
+        *,
+        is_entry: bool,
+    ) -> Decimal:
+        fraction = slippage_bps / Decimal("10000")
+        if action is StrategyAction.BUY:
+            multiplier = Decimal("1") + fraction if is_entry else Decimal("1") - fraction
+        else:
+            multiplier = Decimal("1") - fraction if is_entry else Decimal("1") + fraction
+        return price * multiplier
 
     @staticmethod
     def _market_regime(cycle: TradingCycleResult, reference_price: Decimal) -> str | None:
@@ -320,16 +435,22 @@ class StrategyLearningService:
         exit_price: Decimal,
         closed_at: datetime,
     ) -> StrategyObservation:
+        modeled_exit_price = StrategyLearningService._adverse_price(
+            exit_price,
+            observation.action,
+            observation.modeled_exit_slippage_bps,
+            is_entry=False,
+        )
         gross_return = (
-            (exit_price - observation.entry_price) / observation.entry_price
+            (modeled_exit_price - observation.entry_price) / observation.entry_price
             if observation.action is StrategyAction.BUY
-            else (observation.entry_price - exit_price) / observation.entry_price
+            else (observation.entry_price - modeled_exit_price) / observation.entry_price
         )
         cost = observation.transaction_cost_bps / Decimal("10000")
         return observation.model_copy(
             update={
                 "status": StrategyObservationStatus.CLOSED,
-                "exit_price": exit_price,
+                "exit_price": modeled_exit_price,
                 "net_return": gross_return - cost,
                 "closed_at": closed_at,
             }
