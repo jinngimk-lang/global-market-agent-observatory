@@ -90,6 +90,18 @@ class StrategyRegimeAttribution(BaseModel):
     degradation_reasons: list[str] = Field(default_factory=list)
 
 
+class StrategyOOSRegimeAttribution(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    regime: str
+    holdout_observations: int = 0
+    completed_folds: int = 0
+    expectancy_after_costs: Decimal | None = None
+    max_drawdown: Decimal | None = None
+    win_rate: Decimal | None = None
+    verified: bool = False
+
+
 class StrategyHealth(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -103,4 +115,5 @@ class StrategyHealth(BaseModel):
     degradation_reasons: list[str] = Field(default_factory=list)
     symbol_attribution: list[StrategySymbolAttribution] = Field(default_factory=list)
     regime_attribution: list[StrategyRegimeAttribution] = Field(default_factory=list)
+    oos_regime_attribution: list[StrategyOOSRegimeAttribution] = Field(default_factory=list)
     updated_at: datetime
