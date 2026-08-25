@@ -10,6 +10,7 @@ from app.innovation.store import SQLiteStrategyEvidenceStore
 from app.learning.models import (
     StrategyEntryPriceSource,
     StrategyEvaluationPartition,
+    StrategyExecutionFriction,
     StrategyHealth,
     StrategyHealthPolicy,
     StrategyObservation,
@@ -199,6 +200,7 @@ class StrategyLearningService:
             symbol_attribution=symbol_attribution,
             regime_attribution=regime_attribution,
             oos_regime_attribution=self._oos_regime_attribution(observations),
+            execution_friction=self._execution_friction(observations),
             updated_at=self._now_from_observations(observations),
         )
         self._store.upsert_health(health)
@@ -222,6 +224,51 @@ class StrategyLearningService:
         )
         max_drawdown = StrategyLearningService._max_drawdown(returns) if returns else None
         return count, expectancy, win_rate, max_drawdown
+
+    def _execution_friction(
+        self,
+        observations: list[StrategyObservation],
+    ) -> StrategyExecutionFriction:
+        closed_observations = len(observations)
+        observed_fills = [
+            item
+            for item in observations
+            if item.entry_price_source is StrategyEntryPriceSource.OBSERVED_FILL
+        ]
+        modeled_entries = closed_observations - len(observed_fills)
+        observed_slippage = [
+            item.observed_entry_slippage_bps
+            for item in observed_fills
+            if item.observed_entry_slippage_bps is not None
+        ]
+        observed_latency = [
+            item.execution_latency_seconds
+            for item in observed_fills
+            if item.execution_latency_seconds is not None
+        ]
+        return StrategyExecutionFriction(
+            closed_observations=closed_observations,
+            modeled_entry_observations=modeled_entries,
+            observed_fill_observations=len(observed_fills),
+            observed_fill_rate=(
+                Decimal(len(observed_fills)) / Decimal(closed_observations)
+                if closed_observations
+                else None
+            ),
+            mean_observed_entry_slippage_bps=(
+                sum(observed_slippage, Decimal("0")) / Decimal(len(observed_slippage))
+                if observed_slippage
+                else None
+            ),
+            mean_execution_latency_seconds=(
+                sum(observed_latency, Decimal("0")) / Decimal(len(observed_latency))
+                if observed_latency
+                else None
+            ),
+            current_transaction_cost_bps=self._transaction_cost_bps,
+            current_modeled_entry_slippage_bps=self._modeled_entry_slippage_bps,
+            current_modeled_exit_slippage_bps=self._modeled_exit_slippage_bps,
+        )
 
     def _degradation_reasons(
         self,
