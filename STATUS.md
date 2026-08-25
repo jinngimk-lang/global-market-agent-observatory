@@ -78,6 +78,13 @@ Core rule: **processes recover where safe; capital permission fails closed.** Re
 - Regime-local degradation remains attribution evidence and does not silently become a global kill condition.
 - Held-out OOS regime attribution uses only holdout observations from completed walk-forward folds. Calibration observations, historical `UNASSIGNED` observations, and incomplete folds cannot contaminate OOS regime metrics.
 - Each OOS regime independently reports holdout sample count, completed folds, expectancy, drawdown, win rate, and `verified`; global OOS sufficiency does not imply per-regime sufficiency.
+- Strategy observations now distinguish signal/reference entry price from evaluated entry price and preserve execution-friction provenance.
+- A strategy observation upgrades its entry source to `observed-fill` only when a `FILLED` execution matches an allocation for the same strategy/version/symbol/action/generated-at identity and exact client-order ID. Unrelated fills cannot contaminate the observation.
+- When no verified fill exists, configured entry/exit slippage remains explicitly `modeled`; default modeled entry/exit slippage is zero rather than an invented market-wide constant.
+- Observed fills record actual entry slippage and signal-to-fill observation latency; an observed entry does not also pay modeled entry slippage a second time.
+- Exit evaluation is still fixed-horizon mark-to-market with explicitly modeled exit slippage; it is not represented as an observed broker exit.
+- Strategy health exposes execution-friction attribution: observed-vs-modeled entry counts, observed-fill rate, mean observed entry slippage, mean signal-to-fill latency, and the current modeled transaction-cost/entry/exit assumptions.
+- The Trading Console renders this attribution separately from symbol health. With no verified fills it displays `NO OBSERVED FILLS` and leaves actual slippage/latency unknown instead of manufacturing numbers.
 - Runtime never self-modifies strategy code/parameters or automatically skips promotion stages.
 
 ## Latest verification baseline
@@ -102,6 +109,16 @@ Local evidence:
 - OOS service commit `042228bafc3f6cba916b483ae9f763400e65a731`.
 - Exact-head CI `#478` on `042228bafc3f6cba916b483ae9f763400e65a731` completed successfully: Ruff, full pytest, compileall, engineering-skill verification on Python 3.12 and 3.13, plus Docker build all passed.
 
+### Execution-friction provenance and Trading Console
+
+- Execution-friction observations distinguish modeled entries from exact matched observed fills and record observed entry slippage plus signal-to-fill latency.
+- Settings/runtime wiring exposes `STRATEGY_MODELED_ENTRY_SLIPPAGE_BPS` and `STRATEGY_MODELED_EXIT_SLIPPAGE_BPS`, both defaulting to `0`; configured transaction cost remains separately explicit.
+- Unmatched client-order IDs are ignored for observed-fill attribution.
+- Strategy-health aggregation separates historical observed execution evidence from current modeled friction assumptions.
+- UI RED commit `34c7d77dab76cf467fef2ca0c535b1ec925a6929`, CI `#506`: Docker passed and full pytest failed exactly at the missing execution-friction dashboard contract (`2 failed, 237 passed`).
+- Trading Console container commit `6dd56400fd54f6d780a615dc2e8a72d547c3f605` and renderer commit `b9162c6dc9137a33334feed89179d756c4a312f8` expose observed-fill coverage, actual entry slippage/latency, and modeled cost/entry/exit assumptions without adding any write endpoint.
+- Exact-head CI `#510` on `b9162c6dc9137a33334feed89179d756c4a312f8` completed successfully: Ruff, full pytest, compileall, engineering-skill verification on Python 3.12 and 3.13, plus Docker build all passed.
+
 The status-only commit that records this baseline must itself remain CI-clean before becoming the next exact-head baseline.
 
 ## Ecosystem intelligence state
@@ -114,7 +131,7 @@ Current evidence queue:
 1. QuantConnect IBKR issue #249 — local analogous open-order blind spot addressed with official IBKR trade-history + terminal-status recovery; continue auditing reconnect/recovery semantics.
 2. NautilusTrader `d2b1221...` — ambiguous transport outcome classification; current 408/429 broker mutation gaps are closed, preserve invariant for future mutations.
 3. NautilusTrader `6cb6afc...` — connection epoch / desired-vs-acknowledged subscription recovery; adopt only if local failure injection proves a gap.
-4. Alpaca Python SDK `8b466396...` — reconnect jitter, half-open cleanup, optional silence timeout, control/data frame separation. Half-open/auth cleanup is covered locally; jitter/silence behavior remains evidence-gated.
+4. Alpaca Python SDK `8b466396...` — reconnect jitter, half-open cleanup, optional silence timeout, control/data frame separation. Half-open/auth cleanup is covered locally. A naive fixed silence timeout is not safe for stock bars across closed-market periods; connected-but-mute detection still needs session/provider-aware semantics before production adoption.
 5. QuantConnect LEAN `78232af...` — backup live data pattern; no invisible fallback may satisfy safety-critical live freshness.
 6. QuantConnect LEAN `09e96f...` — duplicate shared-bar correctness independently supports the existing revision/completed-cycle invariant.
 
@@ -123,21 +140,24 @@ No external repository is integrated merely because it is new or popular. Every 
 ## Immediate engineering queue
 
 1. Preserve exact-head CI on the current branch after this status update.
-2. Continue Alpaca WebSocket resilience review: bounded jitter and cadence-aware connected-but-mute detection only when local failure injection justifies change.
-3. Extend OOS evidence with realistic slippage/latency/cost modeling and regime-aware diagnostics without retroactive labeling.
-4. Verify real NVDA/SPCX/KLAC coverage in monitor-only/paper-safe Alpaca configuration when runtime credentials are available outside Git.
-5. Evaluate FINRA/off-exchange evidence with explicit source, reporting-latency, classification, and provenance methodology.
-6. Keep auditing broker mutation/recovery endpoints for definite-vs-ambiguous outcomes and post-disconnect execution recovery.
-7. Keep PR #8 Draft until strategy evidence and operational readiness justify otherwise.
+2. Evaluate tightening LIVE promotion so broker-paper sample counts cannot stand in for verified observed broker-paper fills; use the new exact-fill provenance rather than retroactively relabeling old evidence.
+3. Continue Alpaca WebSocket resilience review, but do not add a naive fixed stock-bar silence timeout that would misclassify market-closed periods; require session/provider-aware evidence first.
+4. Collect real NVDA/SPCX/KLAC observed-fill and coverage evidence in monitor-only/paper-safe or broker-paper configuration when runtime credentials are available outside Git.
+5. Extend execution-friction evidence toward observed exit fills only when an auditable entry-to-exit execution identity exists; keep fixed-horizon exits explicitly modeled until then.
+6. Evaluate FINRA/off-exchange evidence with explicit source, reporting-latency, classification, and provenance methodology.
+7. Keep auditing broker mutation/recovery endpoints for definite-vs-ambiguous outcomes and post-disconnect execution recovery.
+8. Keep PR #8 Draft until strategy evidence and operational readiness justify otherwise.
 
 ## Known blockers / intentionally unfinished
 
 - No current strategy is approved for autonomous live capital.
 - Real broker credentials are never stored in Git.
 - Real Alpaca end-to-end NVDA/SPCX/KLAC runtime evidence has not been produced from this execution environment.
+- Current broker-paper observation counts are not yet separately gated by verified observed-fill depth for LIVE promotion; this is the next evidence-hardening candidate.
+- Fixed-horizon exit evaluation remains modeled; no observed broker exit is claimed without an auditable entry-to-exit execution identity.
 - Dark-pool/off-exchange evidence is not yet integrated.
 - Walk-forward/OOS evidence is still insufficient for live promotion.
-- Alpaca reconnect jitter/connected-but-mute behavior has not yet been justified for production change.
+- Alpaca reconnect jitter/connected-but-mute behavior has not yet been justified for a safe production change.
 
 ## Future-agent rule
 
