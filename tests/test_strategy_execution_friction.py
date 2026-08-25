@@ -60,6 +60,23 @@ def service(tmp_path) -> tuple[StrategyLearningService, SQLiteStrategyLearningSt
     )
 
 
+def allocation_for(strategy_signal: StrategySignal, client_order_id: str) -> AllocationDecision:
+    return AllocationDecision(
+        signal=strategy_signal,
+        intent=OrderIntent(
+            client_order_id=client_order_id,
+            symbol="NVDA",
+            side=Side.BUY,
+            quantity=Decimal("10"),
+            reference_price=Decimal("100"),
+            requested_at=strategy_signal.generated_at,
+        ),
+        code="allocated",
+        message="test",
+        requested_notional=Decimal("1000"),
+    )
+
+
 def test_modeled_slippage_is_explicit_and_applied_adversely(tmp_path) -> None:
     learning, store = service(tmp_path)
     first = candle(0, "100")
@@ -96,21 +113,7 @@ def test_matching_fill_uses_observed_entry_without_double_counting_modeled_slipp
     second = candle(1, "110")
     strategy_signal = signal(first.close_time)
     client_order_id = "auto-nvda-test"
-    intent = OrderIntent(
-        client_order_id=client_order_id,
-        symbol="NVDA",
-        side=Side.BUY,
-        quantity=Decimal("10"),
-        reference_price=Decimal("100"),
-        requested_at=strategy_signal.generated_at,
-    )
-    allocation = AllocationDecision(
-        signal=strategy_signal,
-        intent=intent,
-        code="allocated",
-        message="test",
-        requested_notional=Decimal("1000"),
-    )
+    allocation = allocation_for(strategy_signal, client_order_id)
     execution = ExecutionResult(
         client_order_id=client_order_id,
         broker_order_id="broker-1",
@@ -143,3 +146,35 @@ def test_matching_fill_uses_observed_entry_without_double_counting_modeled_slipp
 
     assert closed.exit_price == Decimal("109.9450")
     assert closed.net_return == Decimal("0.09625548902195608782435129741")
+
+
+def test_unmatched_fill_cannot_contaminate_strategy_execution_provenance(tmp_path) -> None:
+    learning, store = service(tmp_path)
+    first = candle(0, "100")
+    strategy_signal = signal(first.close_time)
+    allocation = allocation_for(strategy_signal, "intended-order")
+    unrelated_fill = ExecutionResult(
+        client_order_id="different-order",
+        broker_order_id="broker-other",
+        status=OrderStatus.FILLED,
+        filled_quantity=Decimal("10"),
+        filled_price=Decimal("120"),
+        observed_at=strategy_signal.generated_at + timedelta(seconds=1),
+    )
+
+    learning.observe_cycle(
+        first,
+        TradingCycleResult(
+            symbol="NVDA",
+            signals=[strategy_signal],
+            allocations=[allocation],
+            executions=[unrelated_fill],
+        ),
+    )
+    observation = store.list_observations("vwap", "1.0.0")[0]
+
+    assert observation.entry_price == Decimal("100.0500")
+    assert observation.entry_price_source.value == "modeled"
+    assert observation.observed_entry_slippage_bps is None
+    assert observation.execution_latency_seconds is None
+    assert observation.execution_client_order_id is None
