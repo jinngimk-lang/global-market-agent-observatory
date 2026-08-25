@@ -13,6 +13,7 @@ from app.learning.models import (
     StrategyHealthPolicy,
     StrategyObservation,
     StrategyObservationStatus,
+    StrategyOOSRegimeAttribution,
     StrategyRegimeAttribution,
     StrategySymbolAttribution,
 )
@@ -184,6 +185,7 @@ class StrategyLearningService:
             degradation_reasons=reasons,
             symbol_attribution=symbol_attribution,
             regime_attribution=regime_attribution,
+            oos_regime_attribution=self._oos_regime_attribution(observations),
             updated_at=self._now_from_observations(observations),
         )
         self._store.upsert_health(health)
@@ -355,6 +357,84 @@ class StrategyLearningService:
             return max(closed_times)
         return datetime.now(UTC)
 
+    def _completed_walk_forward_folds(
+        self,
+        observations: list[StrategyObservation],
+    ) -> list[int]:
+        fold_counts: dict[int, dict[StrategyEvaluationPartition, int]] = {}
+        for observation in observations:
+            fold = observation.walk_forward_fold
+            if fold is None:
+                continue
+            if observation.evaluation_partition not in {
+                StrategyEvaluationPartition.CALIBRATION,
+                StrategyEvaluationPartition.HOLDOUT,
+            }:
+                continue
+            counts = fold_counts.setdefault(
+                fold,
+                {
+                    StrategyEvaluationPartition.CALIBRATION: 0,
+                    StrategyEvaluationPartition.HOLDOUT: 0,
+                },
+            )
+            counts[observation.evaluation_partition] += 1
+        return sorted(
+            fold
+            for fold, counts in fold_counts.items()
+            if counts[StrategyEvaluationPartition.CALIBRATION]
+            >= self._walk_forward_calibration_observations
+            and counts[StrategyEvaluationPartition.HOLDOUT]
+            >= self._walk_forward_holdout_observations
+        )
+
+    def _oos_regime_attribution(
+        self,
+        observations: list[StrategyObservation],
+    ) -> list[StrategyOOSRegimeAttribution]:
+        completed_folds = set(self._completed_walk_forward_folds(observations))
+        holdout = [
+            observation
+            for observation in observations
+            if observation.walk_forward_fold in completed_folds
+            and observation.evaluation_partition is StrategyEvaluationPartition.HOLDOUT
+            and observation.net_return is not None
+            and observation.market_regime is not None
+        ]
+        reports: list[StrategyOOSRegimeAttribution] = []
+        regimes = sorted({observation.market_regime for observation in holdout})
+        for regime in regimes:
+            regime_observations = [
+                observation for observation in holdout if observation.market_regime == regime
+            ]
+            returns = [
+                observation.net_return
+                for observation in regime_observations
+                if observation.net_return is not None
+            ]
+            count, expectancy, win_rate, max_drawdown = self._metrics(returns)
+            regime_folds = {
+                observation.walk_forward_fold
+                for observation in regime_observations
+                if observation.walk_forward_fold is not None
+            }
+            completed_fold_count = len(regime_folds)
+            reports.append(
+                StrategyOOSRegimeAttribution(
+                    regime=regime,
+                    holdout_observations=count,
+                    completed_folds=completed_fold_count,
+                    expectancy_after_costs=expectancy,
+                    max_drawdown=max_drawdown,
+                    win_rate=win_rate,
+                    verified=(
+                        count >= self._oos_min_holdout_observations
+                        and completed_fold_count >= self._oos_min_completed_folds
+                    ),
+                )
+            )
+        return reports
+
     def _walk_forward_oos_metrics(
         self,
         strategy_id: str,
@@ -365,35 +445,13 @@ class StrategyLearningService:
             version,
             closed_only=True,
         )
-        fold_returns: dict[int, dict[str, list[Decimal]]] = {}
-        for observation in observations:
-            if observation.walk_forward_fold is None or observation.net_return is None:
-                continue
-            if observation.evaluation_partition not in {
-                StrategyEvaluationPartition.CALIBRATION,
-                StrategyEvaluationPartition.HOLDOUT,
-            }:
-                continue
-            bucket = fold_returns.setdefault(
-                observation.walk_forward_fold,
-                {"calibration": [], "holdout": []},
-            )
-            bucket[observation.evaluation_partition.value].append(
-                observation.net_return
-            )
-
-        completed_folds = sorted(
-            fold
-            for fold, partitions in fold_returns.items()
-            if len(partitions[StrategyEvaluationPartition.CALIBRATION.value])
-            >= self._walk_forward_calibration_observations
-            and len(partitions[StrategyEvaluationPartition.HOLDOUT.value])
-            >= self._walk_forward_holdout_observations
-        )
+        completed_folds = self._completed_walk_forward_folds(observations)
         holdout_returns = [
-            value
-            for fold in completed_folds
-            for value in fold_returns[fold][StrategyEvaluationPartition.HOLDOUT.value]
+            observation.net_return
+            for observation in observations
+            if observation.walk_forward_fold in completed_folds
+            and observation.evaluation_partition is StrategyEvaluationPartition.HOLDOUT
+            and observation.net_return is not None
         ]
         holdout_observations = len(holdout_returns)
         completed_fold_count = len(completed_folds)
