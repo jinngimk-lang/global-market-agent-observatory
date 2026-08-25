@@ -78,6 +78,29 @@ License/provenance decision: conceptual reuse only. The upstream implementation 
 
 Decision: record as a durable execution-integration invariant; no local code change without a failing test demonstrating a provider-specific gap.
 
+### Commit `67c9c20ba6886719b8dbf1b9a34516a50285e24d`
+
+Observed: 2026-08-25 13:21 UTC.
+Theme: instrument-definition reconciliation under concurrent REST/WebSocket updates.
+
+Relevant upstream behavior:
+
+- run a periodic REST pass to reconcile instrument definitions;
+- share one symbol-keyed cache across concurrent writers;
+- publish only new or materially changed definitions;
+- serialize cache updates;
+- discard a REST snapshot if it became stale while the fetch was in progress.
+
+Local relevance:
+
+The current project uses a configured, static initial equity universe and does not dynamically mutate instrument definitions from concurrent REST and WebSocket writers. Adopting an instrument cache/reconciliation subsystem now would add synchronization complexity without closing a demonstrated local correctness gap.
+
+The transferable invariant is narrower: if dynamic instrument metadata is introduced later, snapshot application must be freshness/epoch-aware so a slower REST response cannot overwrite newer provider state.
+
+License/provenance decision: conceptual reuse only. The upstream implementation is LGPL-3.0 and no source was copied.
+
+Decision: monitor only until dynamic instrument definitions or local failure injection make the race concrete.
+
 ### Commit `ca696f9737df700246bc0e598e494ca84855218b`
 
 Theme: Interactive Brokers adaptive limit order parsing.
@@ -111,6 +134,8 @@ Our outer market-feed supervisor already performs bounded exponential backoff, b
 
 Decision: create local failure-injection tests for cleanup first. Adopt jitter or silence detection only if a concrete local operational gap remains. Do not copy SDK code blindly.
 
+Delta check after 2026-08-25 12:55 UTC: no new `alpaca-py` commits were present in the public repository at scan time.
+
 ## QuantConnect LEAN
 
 Repository: `QuantConnect/Lean`
@@ -142,6 +167,29 @@ This independently reinforces our completed-cycle/revision design: an updated or
 
 Decision: no code change required; keep as supporting external evidence.
 
+### Commit `185c691b89f28bd68e48d53c02147415134975f0`
+
+Observed: 2026-08-25 14:10 UTC.
+Theme: resource guardrails and honest operational diagnostics.
+
+Relevant upstream behavior:
+
+- report out-of-memory/resource exhaustion as such rather than misclassifying it as corrupt market data;
+- warn on very large and repeatedly overlapping historical-data requests;
+- surface abnormally slow time steps and long-running scheduled work;
+- treat many universe selections as a shared resource budget rather than isolated small requests;
+- keep diagnostics fail-open with respect to the algorithm itself: diagnostic failure is logged instead of changing trading behavior.
+
+Local relevance:
+
+The project currently has no equivalent large-history request API or dynamic option-universe selection path, so copying LEAN's thresholds would be arbitrary and would not close a demonstrated local gap. The useful design principle is operational: resource exhaustion must retain its true failure classification, and observability guardrails must not silently become a new capital-authority path.
+
+This becomes more relevant when replay/OOS workloads or large options-chain scans scale enough to create measurable memory/latency pressure. At that point local thresholds should be derived from our own workload and soak evidence, not imported from LEAN constants.
+
+License/provenance decision: Apache-2.0, but no source or threshold values were copied.
+
+Decision: add to the future soak/operational-observability evidence queue; no production change yet.
+
 ## Integration queue created by this scan
 
 Priority order:
@@ -151,6 +199,8 @@ Priority order:
 3. Keep backup market-data sources explicit and provenance-preserving; never let a fallback silently satisfy a live risk freshness requirement.
 4. Continue applying definite-vs-ambiguous mutation classification to any future execution mutation endpoint.
 5. For future broker pacing, coordinate provider-defined quota scopes without weakening idempotency/reconciliation; if request signatures expire, sign only after pacing waits finish.
+6. If dynamic instrument metadata is introduced, make snapshot/cache reconciliation freshness- or epoch-aware so stale REST results cannot overwrite newer state.
+7. When replay/OOS/options workloads become large enough to stress resources, add local memory/latency guardrails from measured soak evidence and keep resource-exhaustion classification honest.
 
 ## License decision
 
