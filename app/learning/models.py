@@ -57,6 +57,7 @@ class StrategyObservation(BaseModel):
     observed_at: datetime
     due_at: datetime
     transaction_cost_bps: Decimal
+    market_regime: str | None = None
     evaluation_partition: StrategyEvaluationPartition = StrategyEvaluationPartition.UNASSIGNED
     walk_forward_fold: int | None = None
     status: StrategyObservationStatus = StrategyObservationStatus.PENDING
@@ -77,6 +78,18 @@ class StrategySymbolAttribution(BaseModel):
     degradation_reasons: list[str] = Field(default_factory=list)
 
 
+class StrategyRegimeAttribution(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    regime: str
+    closed_observations: int = 0
+    expectancy_after_costs: Decimal | None = None
+    max_drawdown: Decimal | None = None
+    win_rate: Decimal | None = None
+    degraded: bool = False
+    degradation_reasons: list[str] = Field(default_factory=list)
+
+
 class StrategyHealth(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -89,4 +102,5 @@ class StrategyHealth(BaseModel):
     degraded: bool = False
     degradation_reasons: list[str] = Field(default_factory=list)
     symbol_attribution: list[StrategySymbolAttribution] = Field(default_factory=list)
+    regime_attribution: list[StrategyRegimeAttribution] = Field(default_factory=list)
     updated_at: datetime
