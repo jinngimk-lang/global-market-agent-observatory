@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 AMBIGUOUS_MUTATION_HTTP_STATUSES = frozenset({408, 429})
 
 
