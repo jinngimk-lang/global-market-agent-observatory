@@ -254,7 +254,7 @@ class StrategyLearningService:
         self,
         signal: StrategySignal,
         signal_entry_price: Decimal,
-        cycle: TradingCycleResult,
+        cycle: TradingCycleResult | None = None,
     ) -> StrategyObservation:
         normalized_id = signal.strategy_id.strip().lower()
         version = signal.version.strip()
@@ -329,7 +329,13 @@ class StrategyLearningService:
         )
 
     @classmethod
-    def _matching_observed_fill(cls, signal: StrategySignal, cycle: TradingCycleResult):
+    def _matching_observed_fill(
+        cls,
+        signal: StrategySignal,
+        cycle: TradingCycleResult | None,
+    ):
+        if cycle is None:
+            return None
         client_order_ids = {
             allocation.intent.client_order_id
             for allocation in cycle.allocations
@@ -362,8 +368,16 @@ class StrategyLearningService:
 
     @staticmethod
     def _execution_latency_seconds(generated_at: datetime, observed_at: datetime) -> Decimal:
-        generated = generated_at if generated_at.tzinfo is not None else generated_at.replace(tzinfo=UTC)
-        observed = observed_at if observed_at.tzinfo is not None else observed_at.replace(tzinfo=UTC)
+        generated = (
+            generated_at
+            if generated_at.tzinfo is not None
+            else generated_at.replace(tzinfo=UTC)
+        )
+        observed = (
+            observed_at
+            if observed_at.tzinfo is not None
+            else observed_at.replace(tzinfo=UTC)
+        )
         seconds = max(
             (observed.astimezone(UTC) - generated.astimezone(UTC)).total_seconds(),
             0.0,
@@ -380,9 +394,13 @@ class StrategyLearningService:
     ) -> Decimal:
         fraction = slippage_bps / Decimal("10000")
         if action is StrategyAction.BUY:
-            multiplier = Decimal("1") + fraction if is_entry else Decimal("1") - fraction
+            multiplier = (
+                Decimal("1") + fraction if is_entry else Decimal("1") - fraction
+            )
         else:
-            multiplier = Decimal("1") - fraction if is_entry else Decimal("1") + fraction
+            multiplier = (
+                Decimal("1") - fraction if is_entry else Decimal("1") + fraction
+            )
         return price * multiplier
 
     @staticmethod
