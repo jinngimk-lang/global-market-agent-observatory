@@ -219,7 +219,118 @@ class IBKRExecutionAdapter:
                     item,
                     fallback_client_order_id=client_order_id,
                 )
-        return None
+
+        try:
+            trades_response = await client.get(
+                "/iserver/account/trades",
+                params={"days": 1},
+            )
+        except httpx.TransportError as exc:
+            return ExecutionResult(
+                client_order_id=client_order_id,
+                status=OrderStatus.UNKNOWN,
+                code="ibkr_trade_lookup_unknown",
+                message=str(exc),
+            )
+        if trades_response.status_code >= 500 or trades_response.is_error:
+            return ExecutionResult(
+                client_order_id=client_order_id,
+                status=OrderStatus.UNKNOWN,
+                code="ibkr_trade_lookup_unknown",
+                message=self._response_message(trades_response),
+            )
+
+        trades_payload = trades_response.json() or []
+        trades = trades_payload if isinstance(trades_payload, list) else []
+        matching_trades = [
+            item
+            for item in trades
+            if str(item.get("order_ref") or "") == client_order_id
+            and str(item.get("account") or item.get("accountCode") or self._account_id)
+            == self._account_id
+        ]
+        if not matching_trades:
+            return None
+
+        broker_order_ids = {
+            str(item.get("order_id"))
+            for item in matching_trades
+            if item.get("order_id") is not None
+        }
+        if len(broker_order_ids) != 1:
+            return self._trade_reconciliation_unknown(
+                client_order_id,
+                matching_trades,
+                message="IBKR trade history did not identify one broker order id.",
+            )
+        broker_order_id = next(iter(broker_order_ids))
+
+        try:
+            status_response = await client.get(
+                f"/iserver/account/order/status/{broker_order_id}"
+            )
+        except httpx.TransportError as exc:
+            return self._trade_reconciliation_unknown(
+                client_order_id,
+                matching_trades,
+                broker_order_id=broker_order_id,
+                message=str(exc),
+            )
+        if status_response.status_code >= 500 or status_response.is_error:
+            return self._trade_reconciliation_unknown(
+                client_order_id,
+                matching_trades,
+                broker_order_id=broker_order_id,
+                message=self._response_message(status_response),
+            )
+
+        status_payload = status_response.json() or {}
+        if not isinstance(status_payload, dict):
+            return self._trade_reconciliation_unknown(
+                client_order_id,
+                matching_trades,
+                broker_order_id=broker_order_id,
+                message="IBKR order-status response was not an object.",
+            )
+        return self._map_execution_order(
+            status_payload,
+            fallback_client_order_id=client_order_id,
+        )
+
+    @classmethod
+    def _trade_reconciliation_unknown(
+        cls,
+        client_order_id: str,
+        trades: list[dict[str, Any]],
+        *,
+        broker_order_id: str | None = None,
+        message: str,
+    ) -> ExecutionResult:
+        filled_quantity = sum(
+            (cls._decimal(item.get("size")) or Decimal("0") for item in trades),
+            Decimal("0"),
+        )
+        total_notional = sum(
+            (
+                (cls._decimal(item.get("size")) or Decimal("0"))
+                * (cls._decimal(item.get("price")) or Decimal("0"))
+                for item in trades
+            ),
+            Decimal("0"),
+        )
+        filled_price = (
+            total_notional / filled_quantity if filled_quantity > Decimal("0") else None
+        )
+        return ExecutionResult(
+            client_order_id=client_order_id,
+            broker_order_id=broker_order_id,
+            status=OrderStatus.UNKNOWN,
+            code="ibkr_trade_reconciliation_unknown",
+            message=message,
+            filled_quantity=filled_quantity,
+            filled_price=filled_price,
+            raw_status="trade_seen_status_unknown",
+        )
 
     async def submit(self, intent: OrderIntent) -> ExecutionResult:
         if intent.order_type is OrderType.LIMIT and intent.limit_price is None:
@@ -518,10 +629,18 @@ class IBKRExecutionAdapter:
             code="broker_result",
             message=f"IBKR order status: {raw_status}",
             filled_quantity=(
-                cls._decimal(item.get("filledQuantity") or item.get("filled_quantity"))
+                cls._decimal(
+                    item.get("filledQuantity")
+                    or item.get("filled_quantity")
+                    or item.get("cum_fill")
+                )
                 or Decimal("0")
             ),
-            filled_price=cls._decimal(item.get("avgPrice") or item.get("avg_price")),
+            filled_price=cls._decimal(
+                item.get("avgPrice")
+                or item.get("avg_price")
+                or item.get("average_price")
+            ),
             raw_status=raw_status,
         )
 
