@@ -104,10 +104,10 @@ def test_activation_is_blocked_while_strategy_health_is_degraded(tmp_path) -> No
             operator_api_token=SecretStr("operator-token"),
         )
     )
-    app.state.runtime.orchestrator.reduce_only("strategy_degradation:test")
-    app.state.runtime.strategy_health_execution_allowed = False
 
     with TestClient(app) as client:
+        app.state.runtime.orchestrator.reduce_only("strategy_degradation:test")
+        app.state.runtime.strategy_health_execution_allowed = False
         response = client.post(
             "/api/operator/activate",
             headers=auth("operator-token"),
