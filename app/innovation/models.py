@@ -55,6 +55,7 @@ class PromotionEvidence(BaseModel):
     replay_observations: int = 0
     paper_observations: int = 0
     broker_paper_observations: int = 0
+    verified_broker_paper_fill_observations: int = 0
     expectancy_after_costs: Decimal | None = None
     max_drawdown: Decimal | None = None
     idempotency_verified: bool = False
@@ -69,6 +70,7 @@ class PromotionEvidence(BaseModel):
         "replay_observations",
         "paper_observations",
         "broker_paper_observations",
+        "verified_broker_paper_fill_observations",
     )
     @classmethod
     def non_negative_counts(cls, value: int) -> int:
