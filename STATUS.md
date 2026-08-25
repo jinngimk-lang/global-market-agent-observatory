@@ -1,6 +1,6 @@
 # Global Market Autonomous Trading Platform — Status
 
-Updated: 2026-08-24
+Updated: 2026-08-25
 Branch: `feature/autonomous-live-trading-platform`
 Draft PR: `#8`
 
@@ -9,228 +9,167 @@ Draft PR: `#8`
 When resuming after context pressure, a new session, an agent handoff, or uncertainty about prior decisions, read in this order:
 
 1. `PROJECT_DIRECTION.md` — durable product direction and safety invariants.
-2. `STATUS.md` — current execution state, completed work, blockers, and next steps.
+2. `STATUS.md` — current branch/workstream state, completed work, blockers, and immediate next steps.
 3. `AGENTS.md` — repository operating rules.
-4. `docs/INNOVATION_DOCTRINE.md` — innovation/reframing method and strategy-promotion doctrine.
-5. newest relevant spec/plan/decision record.
-6. current branch diff, PR/CI state, and live evidence.
+4. `docs/AUTONOMOUS_OWNER_GOVERNANCE.md` — autonomous project-owner authority and ecosystem-intelligence intake gate.
+5. `docs/INNOVATION_DOCTRINE.md` — innovation/reframing method and strategy-promotion doctrine when relevant.
+6. `CONTEXT.md` plus the newest relevant ADR/spec/plan/decision/upstream record.
+7. Current branch, PR/CI evidence, and latest materially relevant upstream/provider changes.
 
-Do not ask the user to repeat durable direction already recorded in these files.
+Do not ask the user to repeat durable direction already recorded here.
 
 ## Current product state
 
-This repository is now being built as the primary autonomous market-monitoring and trading platform, not as a read-only observatory.
+This repository is the primary autonomous market-monitoring and trading platform workstream.
 
 Primary runtime chain:
 
 `market data -> market structure -> strategy hypothesis/signal -> portfolio allocation -> deterministic risk -> execution -> reconciliation -> audit -> continuous evaluation/promotion`
 
-Continuous processes:
+Permanent maintenance chain:
 
-- market-feed loop;
-- options-structure loop when configured;
-- account-observer/reconciliation loop when configured;
-- continuous-improvement loop;
-- autonomous market-cycle processing for each accepted market observation.
+`ecosystem discovery -> verification -> license/security review -> smallest useful integration -> RED/GREEN -> full CI -> provenance -> direction/status update`
 
 Core operating rule:
 
-**Processes should recover and continue where safe; capital permission must fail closed.** A data/feed failure may reconnect automatically, but autonomous risk permission can HALT and remains latched until a separate controlled recovery path exists.
+**Processes recover where safe; capital permission fails closed.** Runtime liveness, broker capability, strategy maturity, strategy health, and operator activation are independent gates.
 
-Live execution is a first-class capability but remains disabled by default. Broker execution capability never implies strategy eligibility.
+## Governance now in force
 
-## Completed on this branch
+- `PROJECT_DIRECTION.md` is a living long-horizon compass and now includes autonomous project ownership plus permanent Continuous Ecosystem Intelligence / Phase 7.
+- `docs/AUTONOMOUS_OWNER_GOVERNANCE.md` defines normal repository autonomy, direction stewardship, upstream intake, license/security/provenance requirements, skill/MCP/connector policy, and project-completeness rules.
+- `AGENTS.md` now requires future agents to recover this governance and to inspect relevant upstream changes before material implementation work.
+- Normal reversible evidence-backed repository decisions should be made autonomously without repeatedly asking the user.
+- Repository autonomy does not grant permission to expose secrets, make paid purchases/legal commitments, perform irreversible external actions, disclose sensitive findings, bypass deterministic risk, promote strategy stages without evidence, or enable live capital merely because a broker/tool supports it.
 
-### Direction, recovery, and innovation doctrine
+## Trading/runtime capabilities completed
 
-- `PROJECT_DIRECTION.md` is the long-horizon project compass.
-- `STATUS.md` is the short-horizon execution checkpoint.
-- `AGENTS.md` contains mandatory recovery and safety rules.
-- `docs/INNOVATION_DOCTRINE.md` adapts constraint deletion / reframing to trading-system design.
-- Strategy design records `category default -> deleted constraint -> new axis` before promotion.
-- Draft PR `#8` remains the integration/verification surface.
-
-### Trading modes and broker boundary
+### Safety and execution
 
 - Explicit `replay`, `paper`, `broker-paper`, and `live` modes.
-- Explicit execution providers: local paper, Alpaca, IBKR.
-- Live mode requires deliberate enable/confirmation; credentials alone cannot enable live execution.
-- Common execution-adapter boundary across paper and broker modes.
-- Alpaca submit/query-by-client-id/cancel/status handling.
-- IBKR submit/`cOID`/reply-confirmation allowlist/cancel/status handling.
-- Unknown broker outcomes reconcile before retry and can trigger HALT.
+- Execution providers: local paper, Alpaca, IBKR.
+- Live execution requires explicit enablement/confirmation and remains OFF by default.
+- Deterministic risk is mandatory before execution.
+- ACTIVE / REDUCING / HALTED state is persisted across restart.
+- Unknown execution outcomes reconcile before retry; ambiguous results are not treated as definite failures.
+- Idempotent client-order identifiers and persistent completed-cycle checkpoints prevent duplicate decisions/orders.
+- Feed/cycle failures can HALT capital permission while process recovery/reconnect continues.
+- Append-only audit records strategy, risk, execution, reconciliation, and kill-switch transitions.
 
-### Deterministic safety kernel
+### Authenticated operator controls
 
-- ACTIVE / REDUCING / HALTED trading states.
-- Persisted trading state survives restart; invalid persisted state fails closed.
-- Risk checks for allowlist, order notional, symbol exposure, group exposure, gross exposure, stale market data, stale account state, daily loss, and portfolio drawdown.
-- Deterministic client-order-id behavior and execution idempotency.
-- Persistent completed-cycle checkpoints prevent duplicate handling after replay/restart.
-- UNKNOWN execution results are deliberately not checkpointed until reconciliation resolves them.
-- Append-only audit trail records signal, risk, execution, reconciliation, system, and kill-switch events.
-- Legacy unauthenticated order API remains restricted to local paper/replay and cannot route to live brokers.
+- `OPERATOR_API_TOKEN` is a dedicated secret, independent of broker keys.
+- `/api/operator/halt` and `/api/operator/activate` use Bearer authentication with constant-time token comparison.
+- Missing operator token fails closed.
+- HALT persists and is audited.
+- ACTIVATE cannot promote a strategy or bypass promotion eligibility.
+- ACTIVATE is rejected while the runtime strategy-health gate is degraded.
+- The lifecycle-race regression test was corrected so health is changed after application startup; production semantics remain request-time health truth.
 
 ### Market data and resilient loops
 
-- Alpaca multi-symbol stock minute-bar stream.
-- Updated/revised bars update history but do not create a second trade decision.
-- Market-feed supervisor reconnects after stream-level failures with bounded backoff.
-- A stream-level failure while autonomous execution is enabled triggers persisted HALT; feed reconnection continues but does **not** auto-reactivate capital permission.
-- Replay feed restart resumes from the latest persisted candle time and close instead of rolling the synthetic market clock backwards.
-- Browser market streaming distinguishes transport/JSON errors from chart-render failures.
-- Browser stream handling ignores older out-of-order candles per symbol+interval rather than sending them into the chart.
-- Runtime loop status exposes running state, failure count, and last error read-only.
-- Loop failures are observable rather than silently killing a task.
-- `/api/market/coverage` independently reports per-symbol raw feed coverage as fresh/stale/missing and strategy-cycle handling as observed/waiting/error.
-- Feed coverage is derived from the persisted candle store, so a received candle and a failed strategy cycle remain distinguishable states.
+- Alpaca multi-symbol stock minute bars.
+- Replay restart resumes from the last persisted candle rather than moving synthetic time backward.
+- Updated/revised bars update history but do not create duplicate trade decisions.
+- Market-feed reconnect supervisor uses bounded exponential backoff and records failure state.
+- Browser stream separates JSON/transport errors from chart rendering errors and ignores old out-of-order candles per symbol+interval.
+- Runtime loop liveness/failures are visible read-only.
+- `/api/market/coverage` separates raw feed FRESH/STALE/MISSING from strategy-cycle OBSERVED/WAITING/ERROR.
 
-### Market structure and options provenance
+### Market structure and options
 
-- VWAP and anchored-VWAP primitives.
-- Volume-profile primitives.
-- Order-flow-imbalance primitives.
-- Transparent GEX proxy with explicit dealer/sign assumptions.
-- Put-wall / call-wall estimation does not claim known dealer inventory.
-- Alpaca options ingestion combines contract metadata/open interest with option snapshot Greeks.
-- Options provenance retains OI date, Greeks timing/source/feed, fetch timing, contract/expiration/strike/multiplier context.
-- Options-structure service converts verified chain data into market-structure snapshots.
-- Structure snapshots have freshness/TTL behavior.
-- Stale or failed options data is invalidated rather than reused as if current.
-- Options-structure loop self-recovers after loop-level exceptions, records failure state, invalidates stale structure, and continues future refresh attempts.
-- `TradingCycleResult` now retains the exact market-structure snapshot that strategies actually evaluated, including observation time, market source, reference price, and methodology/provenance.
-- `/api/market/structure` exposes that exact strategy-used structure read-only instead of recomputing a potentially different view after the fact.
-- Missing structure values stay null/`missing`; the API does not convert absent OFI/options data into zero.
+- VWAP / anchored VWAP, volume profile, order-flow imbalance.
+- Transparent GEX proxy, gamma flip, put-wall and call-wall estimates with explicit methodology/provenance.
+- Alpaca option contract/open-interest data joins option snapshot Greeks/IV.
+- Options structure has freshness/TTL semantics and invalidates stale/failed data.
+- `TradingCycleResult` retains the exact structure used by the strategy.
+- `/api/market/structure` exposes that exact strategy-used snapshot rather than recomputing a different view.
+- Missing values remain missing; inferred values are not presented as direct fact.
 
-### Strategies and portfolio allocation
+### Strategy evidence and promotion
 
-- Versioned strategy signals include action, confidence, rationale, invalidation, and observation timestamp.
-- VWAP reclaim/rejection strategy.
-- Gamma-level strategy requires wall interaction plus observable order-flow confirmation.
-- Portfolio allocation uses loss budget, invalidation distance, per-order caps, and correlated/group exposure.
-- Cost basis is portfolio state only and cannot by itself trigger averaging down.
+- Versioned hypothesis manifests and canonical maturity path: `idea -> research -> replay -> paper -> broker-paper -> live`.
+- Runtime promotion gate validates exact strategy/version evidence and fails closed on missing/mismatched evidence.
+- Continuous learning settles observations only after future prices arrive and applies configured transaction costs.
+- Prospective walk-forward partitioning exists: calibration/holdout/fold assignment is fixed before outcomes are known; historical unassigned observations cannot be retrospectively relabeled as OOS.
+- OOS holdout sample/fold thresholds are wired from `Settings` into both evidence generation and promotion policy.
+- Strategy health includes per-symbol attribution with sample count, net expectancy, win rate, and drawdown.
+- A sufficiently sampled degraded symbol can degrade overall strategy health; tiny symbol samples report attribution without automatically tripping the strategy.
+- Health recovery does not automatically reactivate REDUCING/HALTED state.
+- Runtime never self-modifies strategy code/parameters or automatically skips promotion stages.
 
-### Strategy promotion and continuous improvement
+### Trading Console
 
-- `StrategyHypothesis` manifests record problem, default premise, deleted constraint, new axis, expected mechanism, required inputs/provenance, falsification, failure regimes, safety constraints, version, and stage.
-- Canonical maturity path: `idea -> research -> replay -> paper -> broker-paper -> live`.
-- Promotion evidence is persisted by exact strategy id + version.
-- Runtime code version must match manifest version.
-- Missing manifest/evidence, version mismatch, or insufficient maturity fails closed.
-- `AUTO_TRADING_ENABLED`, broker capability, promotion eligibility, and strategy-health eligibility are independent conditions.
-- Continuous-improvement loop settles historical strategy observations against future prices, applies configured transaction costs, and updates rolling expectancy/win-rate/drawdown evidence.
-- Runtime evidence merges monotonically and cannot replace stronger historical OOS/walk-forward evidence with a tiny new sample.
-- Degraded strategies can force REDUCING.
-- Health recovery clears a health blocker but does not automatically restore ACTIVE from REDUCING/HALTED.
-- The system does not self-modify strategy code/parameters or automatically skip promotion stages in live operation.
+The old Observatory showcase has been removed from the main UI. The console focuses on:
 
-### Broker truth / reconciliation
+- system/trading/promotion state;
+- NVDA/SPCX/KLAC and current-feed symbol switching;
+- per-symbol feed coverage and strategy-cycle state;
+- exact strategy-used VWAP / OFI / Put Wall estimate / Call Wall estimate / Net GEX Proxy and freshness/provenance;
+- strategy action/confidence/rationale/invalidation;
+- allocation/risk/execution outcomes;
+- positions/P&L and audit chain;
+- strategy promotion and health;
+- per-symbol strategy attribution;
+- runtime-loop liveness.
 
-- Broker modes normalize cash, positions, equity, open orders, and daily account PnL into portfolio/risk state.
-- Missing critical broker state is invalid; the system does not substitute zero and continue increasing risk.
-- Alpaca and IBKR account truth remain separate from local paper state.
+A replay BTC chart is explicitly separated from US-equity coverage and is never presented as proof that NVDA/SPCX/KLAC are receiving live data.
 
-### Autonomous Trading Console — current frontend
+## Latest verified CI
 
-The old Observatory-style homepage has been replaced with a focused autonomous-trading console.
+CI `#428` on commit `b6834ead3ea22cf05b6ffc64221cac0eaab98c24` completed successfully after the operator-control lifecycle test correction.
 
-The homepage now answers these questions directly:
-
-1. Is each configured symbol actually receiving fresh market candles?
-2. Did the strategy cycle successfully process the observation?
-3. What exact market structure did the strategies see?
-4. What did each strategy decide and why?
-5. Did portfolio/risk permit an order?
-6. What actually happened at execution/runtime level?
-
-Visible panels now focus on:
-
-- system conclusion and execution/promotion state;
-- per-symbol decision cards;
-- separate `FEED FRESH / FEED STALE / FEED MISSING` and `OBSERVED / WAITING / CYCLE ERROR` state;
-- exact strategy-used VWAP / OFI / Put Wall estimate / Call Wall estimate / Net GEX Proxy values;
-- structure freshness and provenance, with missing values shown as `未观测` rather than zero;
-- strategy action, confidence, rationale, invalidation, allocation, execution result, and current position context;
-- compact market chart for the selected symbol;
-- append-only decision-chain/audit timeline;
-- portfolio equity/cash/gross exposure/P&L and positions;
-- recent execution history;
-- strategy health and promotion state;
-- runtime-loop liveness, failures, and last error.
-
-Removed from the main frontend as unrelated clutter:
-
-- manual simulated-order form;
-- crisis-winner showcase;
-- partnership-research showcase;
-- evidence-library table;
-- research refresh button;
-- external-account showcase table.
-
-The browser backend adapter used by the console is read-only (GET-only). The static observe-only build excludes this adapter entirely.
-
-Important truthfulness behavior: a moving replay chart is never presented as proof that `NVDA / SPCX / KLAC` have corresponding live market cycles. Feed coverage and market-structure availability are displayed independently for each symbol.
-
-## Current strategy reframes
-
-### VWAP v1.0.0
-
-- Category default: price above/below VWAP is treated as generic directional prediction.
-- Deleted constraint: every VWAP observation must predict direction.
-- New axis: trade observable state transitions across VWAP with explicit invalidation and abstain otherwise.
-- Current maturity remains replay unless version-specific promotion evidence proves otherwise.
-
-### Gamma Levels v1.0.0
-
-- Category default: call wall / put wall estimates are treated as authoritative support/resistance.
-- Deleted constraint: a wall estimate alone is sufficient evidence.
-- New axis: wall interaction requires observable flow confirmation while GEX methodology/sign assumptions and provenance remain explicit.
-- Current maturity remains replay unless version-specific promotion evidence proves otherwise.
-
-## Verification state
-
-Draft PR `#8` is active and remains draft.
-
-Latest relevant full verification: GitHub Actions CI `#352` on 2026-08-24 completed green for the market-truth / market-coverage console head.
-
-Verified green in that run:
+Verified by that run:
 
 - Ruff;
-- full pytest suite on Python 3.12;
-- full pytest suite on Python 3.13;
-- application `compileall`;
+- full pytest on Python 3.12;
+- full pytest on Python 3.13;
+- application compileall;
 - required engineering-skill check;
-- Docker container build;
-- replay restart monotonic-time regression tests;
-- browser invalid-stream/render-error/out-of-order regression tests;
-- exact strategy-used market-structure contract tests;
-- provenance-aware `/api/market/structure` API tests;
-- per-symbol `/api/market/coverage` fresh/stale/missing tests;
-- read-only browser adapter contract tests;
-- frontend truthfulness contract for structure, coverage, and cycle state.
+- Docker build.
 
-A separate local browser session against the user's real Alpaca credentials has not been executed from this environment. Do not claim real Alpaca end-to-end verification until actual credentials/runtime evidence exist outside Git.
+At the prior failed run, the only failure was `test_activation_is_blocked_while_strategy_health_is_degraded`: the test changed the health gate before `TestClient` startup and the continuous-improvement startup path legitimately recalculated it. The corrected test changes the simulated degraded health inside the active lifespan, then proves ACTIVATE returns 409. No production bypass was added.
 
-## Immediate next steps
+The documentation/governance commits after CI #428 trigger a newer CI and must be verified before those commits are described as fully green.
 
-1. Expand replay/walk-forward/OOS evidence generation and promotion metrics with held-out partitions, realistic costs/latency, provenance, and regime segmentation.
-2. Add strategy attribution/degradation diagnostics by symbol/regime so one weak regime does not hide inside aggregate expectancy.
-3. Run the console against actual Alpaca multi-symbol stock market data for `NVDA / SPCX / KLAC` in monitor-only/paper-safe configuration and verify source/coverage/decision cards end-to-end when credentials are available locally.
-4. Add authenticated operator controls for explicit HALT/reactivation; no unauthenticated live-control writes.
-5. Integrate dark-pool/off-exchange evidence only after source, classification methodology, and reporting latency are explicit.
-6. Continue replay -> paper -> broker-paper -> live promotion only from recorded evidence.
-7. Keep PR #8 draft until evidence and operational readiness justify merge/readiness.
+## Ecosystem intelligence state
 
-## Known blockers / intentionally unfinished work
+First governed ecosystem scan is recorded in `docs/upstream/2026-08-25-ecosystem-scan.md`.
+
+Current upstream evidence queue:
+
+1. **NautilusTrader `d2b1221...`** — classify transport outcomes before rolling back pending commands; preserve ambiguous state for reconciliation. Strongly aligned with our UNKNOWN-execution architecture. NautilusTrader is LGPL-3.0, so conceptual reuse is preferred unless a future isolated adaptation deliberately satisfies license obligations.
+2. **NautilusTrader `6cb6afc...`** — atomic WebSocket subscription state, request/connection epoch correlation, desired-subscription replay on reconnect. Evaluate only if local failure-injection exposes a concrete gap.
+3. **Alpaca Python SDK `8b466396...`** — reconnect jitter, half-open socket cleanup, optional connected-but-mute timeout, control-vs-market-frame separation. Alpaca SDK is Apache-2.0. Review our Alpaca feed with RED tests before adopting any behavior.
+4. **QuantConnect LEAN `78232af...`** — backup live-universe source pattern. LEAN is Apache-2.0. We will not silently substitute backup data for safety-critical primary truth; any fallback must retain explicit provenance and fail-closed risk semantics.
+5. **QuantConnect LEAN `09e96f...`** — duplicate shared-bar correctness fix independently supports our existing revision/completed-cycle invariant; no local change needed now.
+
+An hourly condition-based ecosystem watch is configured externally to inspect relevant public GitHub/provider/security developments and remain silent when nothing material changes. Any integration still has to pass the repository intake gate and CI; monitoring does not mean uncontrolled mutation.
+
+## Immediate engineering queue
+
+Priority order is now:
+
+1. Audit every Alpaca/IBKR execution command path for explicit definite-vs-ambiguous outcome classification before pending state is cleared or retry is possible.
+2. Review Alpaca WebSocket connect/auth/reconnect lifecycle against the latest upstream reliability findings: half-open cleanup, jitter bounds, and opt-in silence detection; add local failure-injection tests before changing production behavior.
+3. Expand prospective OOS/walk-forward evidence with regime segmentation, realistic costs/slippage/latency, and provenance without retroactive holdout labeling.
+4. Add regime-level strategy attribution after the completed per-symbol attribution layer.
+5. Verify real NVDA/SPCX/KLAC market coverage end-to-end in monitor-only/paper-safe Alpaca configuration when runtime credentials are available outside Git.
+6. Evaluate FINRA/off-exchange evidence with source/reporting-latency/classification methodology before integration.
+7. Keep PR #8 Draft until evidence and operational readiness justify a different state.
+
+## Known blockers / intentionally unfinished
 
 - No current strategy is approved for autonomous live capital.
-- Real broker credentials are never stored in Git and are not part of the branch.
-- Real Alpaca end-to-end market coverage for `NVDA / SPCX / KLAC` has not been verified from this execution environment.
+- Real broker credentials are not stored in Git.
+- Real Alpaca end-to-end NVDA/SPCX/KLAC runtime evidence has not been produced from this execution environment.
 - Dark-pool/off-exchange evidence is not yet integrated.
-- Strategy walk-forward/OOS evidence is not yet sufficient for live promotion.
-- Authenticated operator write APIs for controlled reactivation are not implemented.
-- Default local `.env` may remain replay-oriented; seeing a moving chart is not equivalent to receiving real stock market data.
+- Walk-forward/OOS evidence is not sufficient for live promotion.
+- Alpaca reconnect jitter/half-open cleanup has not yet been locally regression-tested against our implementation.
+- Complete command-by-command ambiguous-outcome audit across both live broker adapters is still pending.
 
-## Rule for future agents
+## Future-agent rule
 
-Do not interpret “live execution supported” as “strategies are safe to run live”. Broker connectivity and strategy promotion are separate gates. Keep improving data, evidence, runtime resilience, and observability while preserving fail-closed capital permissions.
+Do not interpret “live execution supported” as “strategy safe for live capital”. Broker capability, market-data quality, strategy evidence, health, deterministic risk, operator state, and reconciliation are independent gates.
+
+Keep improving the platform autonomously, but only integrations that reduce uncertainty and survive local evidence/CI belong in the system.
