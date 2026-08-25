@@ -128,6 +128,10 @@ class ApplicationState:
             mode=settings.trading_mode,
             evaluation_horizon_seconds=settings.strategy_evaluation_horizon_seconds,
             transaction_cost_bps=settings.strategy_transaction_cost_bps,
+            modeled_entry_slippage_bps=(
+                settings.strategy_modeled_entry_slippage_bps
+            ),
+            modeled_exit_slippage_bps=settings.strategy_modeled_exit_slippage_bps,
             health_policy=StrategyHealthPolicy(
                 min_observations=settings.strategy_degradation_min_observations,
                 window_observations=settings.strategy_degradation_window_observations,
