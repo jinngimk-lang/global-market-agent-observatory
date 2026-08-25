@@ -20,6 +20,7 @@ def test_dashboard_focuses_on_autonomous_trading_decisions() -> None:
         "positions-body",
         "executions-body",
         "strategy-health-body",
+        "strategy-execution-friction",
         "strategy-symbol-attribution",
         "runtime-loops",
         "chart",
@@ -83,11 +84,19 @@ def test_dashboard_reads_only_trading_decision_structure_coverage_and_audit_data
 
     for attribution_truth in [
         "symbol_attribution",
+        "execution_friction",
         "标的归因",
         "样本",
         "期望",
         "回撤",
         "DEGRADED",
+        "OBSERVED FILL",
+        "NO OBSERVED FILLS",
+        "真实入场滑点",
+        "Signal→Fill 延迟",
+        "MODELED COST",
+        "MODELED ENTRY",
+        "MODELED EXIT",
     ]:
         assert attribution_truth in attribution
 
