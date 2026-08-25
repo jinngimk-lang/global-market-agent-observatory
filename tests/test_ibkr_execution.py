@@ -232,6 +232,48 @@ async def test_ibkr_lookup_matches_client_order_reference_and_filled_state() -> 
 
 
 @pytest.mark.asyncio
+async def test_ibkr_lookup_recovers_fill_from_trade_history_when_order_is_closed() -> None:
+    requested_paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_paths.append(request.url.path)
+        if request.url.path == "/v1/api/iserver/account/orders":
+            return httpx.Response(200, json={"orders": []})
+        if request.url.path == "/v1/api/iserver/account/trades":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "execution_id": "exec-1",
+                        "order_ref": "nvda-ibkr-1",
+                        "order_id": 99,
+                        "symbol": "NVDA",
+                        "size": 2,
+                        "price": "201.25",
+                        "account": "U123",
+                    }
+                ],
+            )
+        raise AssertionError(f"Unexpected path: {request.url.path}")
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://localhost:5000/v1/api"
+    ) as client:
+        adapter = IBKRExecutionAdapter(account_id="U123", client=client)
+        result = await adapter.get_order_by_client_id("nvda-ibkr-1")
+
+    assert requested_paths == [
+        "/v1/api/iserver/account/orders",
+        "/v1/api/iserver/account/trades",
+    ]
+    assert result is not None
+    assert result.status is OrderStatus.FILLED
+    assert result.broker_order_id == "99"
+    assert result.filled_quantity == Decimal("2")
+    assert result.filled_price == Decimal("201.25")
+
+
+@pytest.mark.asyncio
 async def test_ibkr_cancel_acknowledgement_is_not_misreported_as_cancelled() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "DELETE"
