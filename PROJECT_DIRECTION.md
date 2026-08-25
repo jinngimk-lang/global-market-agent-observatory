@@ -12,6 +12,7 @@ The system's core mission is:
 4. Support both paper and live execution through broker adapters.
 5. Keep live execution disabled by default until explicitly enabled in runtime configuration.
 6. Maintain complete auditability: every signal, risk decision, order intent, order, fill, rejection, data source, and system state transition must be reconstructable.
+7. Continuously improve the platform by monitoring relevant upstream projects, broker/data interfaces, engineering research, and security changes, then integrating only evidence-backed improvements through an auditable review and test gate.
 
 This file is the repository's long-horizon project compass. Agents must reread it whenever resuming work after context loss, starting a new implementation session, or making an architectural decision that could alter the product direction.
 
@@ -23,7 +24,11 @@ It is an **autonomous market monitoring and trading platform** whose main loop i
 
 `market data -> market structure -> strategy signals -> portfolio context -> deterministic risk -> order intent -> execution -> reconciliation -> audit -> learning/evaluation`
 
-Research, dashboards, backtests, replay, and paper trading exist to improve and validate that loop.
+A second permanent project-maintenance loop runs alongside the trading loop:
+
+`ecosystem discovery -> verification -> license/security review -> smallest useful integration -> TDD/CI -> provenance -> direction/status update`
+
+Research, dashboards, backtests, replay, paper trading, ecosystem monitoring, and upstream analysis exist to improve and validate the core trading loop.
 
 ## Initial Trading Universe
 
@@ -34,6 +39,34 @@ The first explicitly managed US equity names are:
 - KLAC
 
 The architecture must not hard-code these symbols. The universe must be configurable and extensible to other equities, ETFs, options, futures, and crypto where broker/data support exists.
+
+## Autonomous Project Ownership
+
+The project should not depend on repeated user prompts for ordinary repository engineering decisions.
+
+Within the current authorized repository/workstream, the project owner agent is expected to autonomously decide and execute normal, reversible, evidence-backed work including:
+
+- architecture and implementation order;
+- tests and validation design;
+- refactors and documentation;
+- issue/PR coordination;
+- dependencies and reviewed upstream adaptations;
+- skills, MCP servers, connectors, and engineering tools when existing capabilities are insufficient;
+- updates to this project direction when stronger evidence supports a materially better path.
+
+The agent should not repeatedly ask the user to approve routine technical choices already covered by this mandate.
+
+This autonomy is explicitly separate from capital permission. It does not authorize:
+
+- committing or exposing credentials;
+- paid purchases or subscriptions;
+- legal or contractual commitments;
+- destructive/irreversible external actions;
+- public disclosure of sensitive security findings;
+- automatic strategy-stage promotion without evidence;
+- enabling live capital merely because a broker or MCP capability exists.
+
+The canonical operating details are in `docs/AUTONOMOUS_OWNER_GOVERNANCE.md`.
 
 ## Core Principles
 
@@ -78,7 +111,7 @@ For example, GEX calculations must preserve the sign convention and dealer-inven
 
 ### 3. Strategies propose; risk decides
 
-No strategy, LLM, research agent, or signal source may directly place a broker order.
+No strategy, LLM, research agent, signal source, MCP server, connector, or upstream project may directly place a broker order.
 
 The required path is:
 
@@ -146,6 +179,16 @@ The system must continuously reconcile:
 - rejections
 
 Internal state must never silently diverge from broker state.
+
+### 8. Processes recover; capital permission fails closed
+
+Long-running feed, options, learning, reconciliation, and observation loops should recover from transient failures when safe. A process being alive does not imply trading permission.
+
+A feed or execution failure may recover operationally while the capital state remains REDUCING or HALTED until the required evidence and explicit controlled recovery path are satisfied.
+
+### 9. Project direction is evidence-driven and self-correcting
+
+This document is a living compass. When new evidence, upstream fixes, provider changes, security findings, or better architecture materially change the best path, update this document and `STATUS.md` rather than silently drifting or preserving an inferior plan because it is old.
 
 ## Main Runtime Architecture
 
@@ -259,6 +302,7 @@ Execution must handle:
 - rejection
 - retry rules that cannot duplicate an order
 - reconciliation
+- explicit classification of definite failure versus ambiguous/unknown transport outcome before pending state is rolled back or retried
 
 ### Orchestrator / Trading Loop
 
@@ -321,6 +365,31 @@ These are architectural invariants unless the project direction is deliberately 
 8. Secrets are never committed to Git.
 9. Kill switch is available independent of strategy logic.
 10. The system must be able to stop creating new exposure without requiring an LLM or external research service.
+11. Skills, MCP servers, connectors, and upstream integrations cannot override these invariants.
+
+## Continuous Ecosystem Intelligence
+
+Continuous ecosystem monitoring is a permanent project responsibility.
+
+The project should regularly inspect:
+
+- Alpaca market-data, options, execution, SDK, schema, and streaming changes;
+- Interactive Brokers API, order, and reconciliation behavior;
+- NautilusTrader execution/reconciliation/feed-recovery patterns;
+- QuantConnect/LEAN live-data, brokerage, backtest, and correctness fixes;
+- relevant market-data/options/off-exchange providers;
+- FINRA/exchange/regulatory interfaces;
+- replay/backtest/walk-forward/OOS tooling;
+- security advisories and dependency/supply-chain issues;
+- credible reproducible research relevant to observable market structure, execution, or portfolio risk.
+
+The required intake path is:
+
+`discover -> classify -> verify -> license/security review -> compare against current system -> smallest useful integration -> RED/GREEN -> full CI -> provenance -> direction/status update`
+
+A discovery is not integrated merely because it is new, popular, or highly starred. It must reduce a real uncertainty or blocker.
+
+When no code needs to be copied, prefer adopting the proven behavior or design principle. When code is adapted, record the exact upstream repository and commit/tag plus license/attribution requirements.
 
 ## External Project Reuse Policy
 
@@ -329,15 +398,18 @@ External GitHub projects may be studied and selected components may be adapted w
 Before importing code:
 
 - inspect license compatibility
-- identify upstream repository and commit/tag
+- identify upstream repository and exact commit/tag
 - understand the security model
 - remove unrelated code
 - avoid vendoring secrets or example credentials
 - preserve attribution/license requirements
 - add tests around adapted behavior
+- record provenance
 - prefer small reviewed adaptations over blindly copying entire projects
 
 Good external ideas may be adopted even when code is not copied.
+
+Detailed operating rules are defined in `docs/AUTONOMOUS_OWNER_GOVERNANCE.md`.
 
 ## Data and Broker Priorities
 
@@ -363,10 +435,12 @@ Required validation layers:
 - replay tests for strategies
 - idempotency tests for order submission
 - failure-injection tests for stale feeds and broker outages
+- transport-outcome classification tests for definite versus ambiguous failures
 - reconciliation tests
 - paper/broker-paper soak tests
 - backtests with transaction costs and slippage
 - walk-forward / out-of-sample evaluation for strategies
+- upstream-adaptation regression tests when external behavior is adopted
 
 Do not promote a strategy to live solely because its in-sample backtest is profitable.
 
@@ -415,25 +489,27 @@ The intended implementation sequence is:
 - automatic exits and risk reduction
 - continuous broker reconciliation
 - operational alerts and dashboards
+- authenticated operator HALT/reactivation controls that cannot bypass promotion or health gates
 
 ### Phase 6 — Evidence and Optimization
 
 - dark-pool/off-exchange evidence
 - institutional/ETF flow evidence
 - strategy attribution
-- walk-forward evaluation
+- prospective held-out walk-forward evaluation
 - parameter governance
 - automatic disabling of degraded strategies
 
-## Current User Portfolio Context
+### Phase 7 — Continuous Ecosystem Hardening
 
-The first user-facing monitoring use case includes roughly equal initial allocations to:
+This phase is permanent and overlaps all earlier phases:
 
-- NVDA, user cost basis around USD 195
-- SPCX, user cost basis around USD 159
-- KLAC, user cost basis around USD 244
-
-These values are initial portfolio context only. They must never be treated as automatic support/resistance or reasons to average down.
+- monitor relevant upstream projects and official provider changes;
+- triage security/correctness fixes by risk and relevance;
+- adapt the smallest proven behavior with local tests;
+- preserve license/provenance;
+- keep `PROJECT_DIRECTION.md` and `STATUS.md` synchronized with durable improvements;
+- reject integrations that add more uncertainty than they remove.
 
 ## Definition of Success
 
@@ -449,16 +525,21 @@ The project is successful when it can:
 8. provide a complete audit trail
 9. measure strategy performance out of sample
 10. automatically stop or reduce risk when data, execution, or strategy health deteriorates
+11. continuously absorb relevant ecosystem improvements without weakening safety, provenance, or reproducibility
+12. preserve enough repository documentation that a future agent can recover the current direction without requiring the user to restate it
 
 ## Context-Recovery Protocol for Agents
 
 When an agent loses conversational context, starts a new session, resumes after a long interruption, or is unsure whether a proposed change fits the project:
 
 1. Read `PROJECT_DIRECTION.md` in full.
-2. Read `AGENTS.md`.
-3. Read `CONTEXT.md` and any relevant ADRs/specs/plans for the current change.
-4. Inspect current branch status and recent commits before modifying code.
-5. Reconcile the requested change against the Purpose, Core Principles, Live-Trading Safety Invariants, and Delivery Order above.
-6. If implementation conflicts with this document, do not silently drift. Either preserve the documented direction or explicitly update this document as part of a deliberate project-direction change.
+2. Read `STATUS.md`.
+3. Read `AGENTS.md`.
+4. Read `docs/AUTONOMOUS_OWNER_GOVERNANCE.md`.
+5. Read `docs/INNOVATION_DOCTRINE.md` when relevant.
+6. Read `CONTEXT.md` and any relevant ADRs/specs/plans for the current change.
+7. Inspect current branch status, PR/CI evidence, and the newest materially relevant upstream/provider developments before modifying code.
+8. Reconcile the requested change against the Purpose, Core Principles, Live-Trading Safety Invariants, and Delivery Order above.
+9. If evidence supports a materially better direction, update this document and `STATUS.md` rather than silently drifting.
 
 This protocol is part of the project architecture, not optional documentation hygiene.
