@@ -11,13 +11,38 @@ Whenever starting a new implementation session, resuming after a long interrupti
 1. Read `PROJECT_DIRECTION.md` in full — durable product direction and safety invariants.
 2. Read `STATUS.md` — current branch/workstream state, completed work, blockers, and immediate next steps.
 3. Read this `AGENTS.md` — repository operating rules.
-4. Read `docs/INNOVATION_DOCTRINE.md` when designing or changing a strategy, architecture premise, integration strategy, safety boundary, or durable workflow.
-5. Read `CONTEXT.md` plus the newest relevant ADR/spec/plan/decision record.
-6. Inspect the current branch, PR/CI state, and current evidence before editing code.
+4. Read `docs/AUTONOMOUS_OWNER_GOVERNANCE.md` — autonomous project-owner authority, ecosystem-intelligence loop, and external-integration gate.
+5. Read `docs/INNOVATION_DOCTRINE.md` when designing or changing a strategy, architecture premise, integration strategy, safety boundary, or durable workflow.
+6. Read `CONTEXT.md` plus the newest relevant ADR/spec/plan/decision record.
+7. Inspect the current branch, PR/CI state, current evidence, and the latest relevant upstream/ecosystem changes before editing code.
 
 Do not ask the user to repeat stable direction the repository already records.
 
 Do not silently drift away from canonical project truth. If durable direction changes, update the canonical document and `STATUS.md` in the same workstream; add a decision record when rationale would otherwise be lost.
+
+## Autonomous project-owner operating rule
+
+Within the repository and current authorized workstream, normal reversible evidence-backed engineering decisions should be made and executed autonomously instead of repeatedly asking the user for confirmation.
+
+This includes architecture, implementation order, tests, refactors, documentation, issue/PR coordination, dependency choices, skills, MCP/connectors, and reviewed upstream integrations when they materially improve the project.
+
+The agent must proactively acquire or use appropriate skills, MCP servers, connectors, or tooling when existing capabilities are insufficient and the additional tool is available and safe.
+
+This autonomy does **not** grant permission to bypass capital-safety boundaries. It never implies permission to expose or rotate secrets, make paid purchases, create legal commitments, perform destructive/irreversible external actions, disclose sensitive security findings publicly, promote strategy maturity without evidence, or enable live capital merely because broker capability exists.
+
+For the full operating model, follow `docs/AUTONOMOUS_OWNER_GOVERNANCE.md`.
+
+## Continuous ecosystem intelligence
+
+The project must not assume its current dependencies, broker APIs, data providers, or engineering patterns are permanently optimal.
+
+Continuously inspect relevant public GitHub projects, official broker/data documentation, releases, security advisories, market-data interfaces, and credible engineering research. Prioritize changes related to Alpaca, IBKR, NautilusTrader, QuantConnect/LEAN, market-data/options/off-exchange sources, execution/reconciliation, replay/backtest/OOS correctness, transport/WebSocket reliability, and supply-chain security.
+
+External discoveries enter the repository only through this evidence gate:
+
+`discover -> classify -> verify -> license/security review -> compare -> smallest useful integration -> RED/GREEN -> full CI -> provenance -> PROJECT_DIRECTION/STATUS update`
+
+Never copy a repository or source file merely because it is popular or new. Prefer adopting a proven pattern over copying code when practical. Record exact upstream repository/tag/commit and attribution for non-trivial adaptations.
 
 ## Product safety boundary
 
@@ -27,7 +52,7 @@ The mandatory execution path is:
 
 `StrategySignal -> OrderIntent -> deterministic RiskDecision -> ExecutionAdapter -> reconciliation`
 
-No LLM, research agent, strategy module, UI action, or external signal may bypass deterministic risk approval.
+No LLM, research agent, strategy module, UI action, external signal, skill, MCP server, or upstream project may bypass deterministic risk approval.
 
 The system must fail closed when market data, broker state, reconciliation state, or execution outcome is stale, missing, or uncertain.
 
@@ -68,6 +93,8 @@ Do not add indicators, agents, data vendors, or abstractions merely because they
 
 The engineering skill collection is pinned in `.agents/skills.lock.json`. Initialize it with `./scripts/bootstrap_agent_skills.sh`; skills are exposed through `.agents/skills/`.
 
+If project work requires a capability not covered by the pinned collection, proactively discover and use a suitable skill/MCP/connector when available, then document any durable workflow dependency that future agents must know.
+
 ### Issue tracker
 
 Work is tracked in GitHub Issues for `jinngimk-lang/global-market-agent-observatory`. See `docs/agents/issue-tracker.md`.
@@ -78,7 +105,7 @@ Use the canonical triage vocabulary documented in `docs/agents/triage-labels.md`
 
 ### Domain docs
 
-Read `PROJECT_DIRECTION.md`, `STATUS.md`, this file, `docs/INNOVATION_DOCTRINE.md` when relevant, `CONTEXT.md`, and relevant ADRs under `docs/adr/` before changing system behavior. See `docs/agents/domain.md`.
+Read `PROJECT_DIRECTION.md`, `STATUS.md`, this file, `docs/AUTONOMOUS_OWNER_GOVERNANCE.md`, `docs/INNOVATION_DOCTRINE.md` when relevant, `CONTEXT.md`, and relevant ADRs under `docs/adr/` before changing system behavior. See `docs/agents/domain.md`.
 
 ## Engineering rules
 
@@ -92,6 +119,7 @@ Read `PROJECT_DIRECTION.md`, `STATUS.md`, this file, `docs/INNOVATION_DOCTRINE.m
 - Kill-switch behavior must not depend on an LLM or research service.
 - Broker/account reconciliation is mandatory for live execution.
 - Inferred market structure such as dealer positioning must retain methodology/provenance and must not be represented as direct fact.
-- External code may only be adapted after license/security review and must retain required attribution.
-- Run targeted tests during implementation, then the complete test suite and static checks before committing.
-- Review every change against repository standards, `PROJECT_DIRECTION.md`, `STATUS.md`, the innovation doctrine when relevant, and the originating requirement.
+- External code may only be adapted after license/security review and must retain required attribution and upstream provenance.
+- External discoveries must be evaluated for whether they reduce uncertainty or merely add dependencies.
+- Run targeted tests during implementation, then the complete test suite and static checks before treating the work as complete.
+- Review every change against repository standards, `PROJECT_DIRECTION.md`, `STATUS.md`, autonomous-owner governance, the innovation doctrine when relevant, and the originating requirement.
