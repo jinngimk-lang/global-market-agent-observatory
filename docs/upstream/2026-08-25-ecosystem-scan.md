@@ -24,9 +24,20 @@ Relevant upstream behavior:
 
 Local relevance:
 
-Our project already treats UNKNOWN execution results as reconciliation-required and deliberately avoids retrying ambiguous submissions. This upstream change is a strong independent reference for that architecture. The next local review should verify that every Alpaca/IBKR command path—not only create order—classifies definite versus ambiguous outcomes before clearing pending state or retrying.
+Our project already treated transport errors and server-side unknown execution results as reconciliation-required, but a local RED audit found that HTTP 408/429 on mutation endpoints were still being interpreted as definite `REJECTED` results. These statuses can occur after a request crossed a network/proxy/rate-limit boundary, so an automatic retry after such a classification can duplicate an order or cancellation.
 
-Decision: adopt the behavior pattern conceptually; do not copy LGPL source. Add local regression tests only where a concrete gap is found.
+Local integration completed:
+
+- `tests/test_broker_mutation_outcomes.py` created ten targeted RED cases for HTTP 408/429;
+- Alpaca submit/cancel now return provider-specific `UNKNOWN` results for those ambiguous HTTP outcomes;
+- IBKR submit, precautionary-confirmation reply, and cancel now return provider-specific `UNKNOWN` results for those outcomes;
+- `app/broker/http_outcomes.py` centralizes the local mutation-status classification;
+- implementation commits: `6fd5701662eb4cb46a9d7a1a11f6deca9b4f6d3b` and `06737299996dfbc97df9fc588ff2277a45a4eec2`;
+- exact-head CI `#450` passed Ruff, full pytest on Python 3.12/3.13, compileall, engineering-skill verification, and Docker build.
+
+License/provenance decision: conceptual reuse only. No NautilusTrader LGPL source was copied or adapted.
+
+Decision: local gap closed for the current Alpaca submit/cancel and IBKR submit/confirmation/cancel mutation paths. Preserve this invariant for every future broker mutation endpoint.
 
 ### Commit `6cb6afcfc5f34cf70afbad0d0791650526f9920a`
 
@@ -76,7 +87,7 @@ Local relevance:
 
 Our outer market-feed supervisor already performs bounded exponential backoff, but currently uses deterministic delays. The local Alpaca feed should be reviewed for half-open socket cleanup and whether equal-jitter backoff would reduce synchronized reconnect risk without harming deterministic tests. A data-level silence timeout must remain opt-in and must be calibrated to the subscription cadence to avoid false positives.
 
-Decision: create local RED tests for jitter bounds/half-open cleanup only if the current feed implementation demonstrably lacks those protections. Do not copy SDK code blindly.
+Decision: create local failure-injection tests for cleanup first. Adopt jitter or silence detection only if a concrete local operational gap remains. Do not copy SDK code blindly.
 
 ## QuantConnect LEAN
 
@@ -113,10 +124,10 @@ Decision: no code change required; keep as supporting external evidence.
 
 Priority order:
 
-1. Review Alpaca/IBKR execution command paths for complete definite-vs-ambiguous outcome classification.
-2. Review Alpaca WebSocket connection lifecycle for half-open cleanup and reconnect jitter.
-3. Add dynamic-subscription epoch/acknowledgement machinery only if the project actually introduces runtime subscription changes; avoid premature complexity.
-4. Keep backup market-data sources explicit and provenance-preserving; never let a fallback silently satisfy a live risk freshness requirement.
+1. Review Alpaca WebSocket connection lifecycle for half-open cleanup and reconnect jitter.
+2. Add dynamic-subscription epoch/acknowledgement machinery only if the project actually introduces runtime subscription changes; avoid premature complexity.
+3. Keep backup market-data sources explicit and provenance-preserving; never let a fallback silently satisfy a live risk freshness requirement.
+4. Continue applying definite-vs-ambiguous mutation classification to any future execution mutation endpoint.
 
 ## License decision
 
