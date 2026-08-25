@@ -254,6 +254,16 @@ async def test_ibkr_lookup_recovers_fill_from_trade_history_when_order_is_closed
                     }
                 ],
             )
+        if request.url.path == "/v1/api/iserver/account/order/status/99":
+            return httpx.Response(
+                200,
+                json={
+                    "order_id": 99,
+                    "order_status": "Filled",
+                    "cum_fill": "2.0",
+                    "average_price": "201.25",
+                },
+            )
         raise AssertionError(f"Unexpected path: {request.url.path}")
 
     async with httpx.AsyncClient(
@@ -265,6 +275,7 @@ async def test_ibkr_lookup_recovers_fill_from_trade_history_when_order_is_closed
     assert requested_paths == [
         "/v1/api/iserver/account/orders",
         "/v1/api/iserver/account/trades",
+        "/v1/api/iserver/account/order/status/99",
     ]
     assert result is not None
     assert result.status is OrderStatus.FILLED
