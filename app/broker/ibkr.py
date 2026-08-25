@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from app.broker.http_outcomes import is_ambiguous_mutation_http_status
 from app.domain.models import (
     ExternalAccountSnapshot,
     ObservedOrder,
@@ -270,6 +271,13 @@ class IBKRExecutionAdapter:
                 code="ibkr_submit_unknown",
                 message=str(exc),
             )
+        if is_ambiguous_mutation_http_status(response.status_code):
+            return ExecutionResult(
+                client_order_id=intent.client_order_id,
+                status=OrderStatus.UNKNOWN,
+                code="ibkr_submit_http_unknown",
+                message=self._response_message(response),
+            )
         if response.status_code >= 500:
             return ExecutionResult(
                 client_order_id=intent.client_order_id,
@@ -382,6 +390,13 @@ class IBKRExecutionAdapter:
                     code="ibkr_confirmation_unknown",
                     message=str(exc),
                 )
+            if is_ambiguous_mutation_http_status(response.status_code):
+                return ExecutionResult(
+                    client_order_id=client_order_id,
+                    status=OrderStatus.UNKNOWN,
+                    code="ibkr_confirmation_http_unknown",
+                    message=self._response_message(response),
+                )
             if response.status_code >= 500:
                 return ExecutionResult(
                     client_order_id=client_order_id,
@@ -432,6 +447,13 @@ class IBKRExecutionAdapter:
                 status=OrderStatus.UNKNOWN,
                 code="ibkr_cancel_unknown",
                 message=str(exc),
+            )
+        if is_ambiguous_mutation_http_status(response.status_code):
+            return ExecutionResult(
+                broker_order_id=broker_order_id,
+                status=OrderStatus.UNKNOWN,
+                code="ibkr_cancel_http_unknown",
+                message=self._response_message(response),
             )
         if response.status_code >= 500:
             return ExecutionResult(
