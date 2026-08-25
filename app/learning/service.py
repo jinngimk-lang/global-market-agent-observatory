@@ -660,6 +660,11 @@ class StrategyLearningService:
         )
 
     def _sync_promotion_evidence(self, health: StrategyHealth) -> None:
+        observations = self._store.list_observations(
+            health.strategy_id,
+            health.version,
+            closed_only=True,
+        )
         counts = self._store.count_closed_by_mode(health.strategy_id, health.version)
         existing = (
             self._evidence_store.get(health.strategy_id, health.version)
@@ -668,6 +673,12 @@ class StrategyLearningService:
         runtime_replay = counts.get(TradingMode.REPLAY, 0)
         runtime_paper = counts.get(TradingMode.PAPER, 0)
         runtime_broker_paper = counts.get(TradingMode.BROKER_PAPER, 0)
+        runtime_verified_broker_paper_fills = sum(
+            1
+            for observation in observations
+            if observation.mode is TradingMode.BROKER_PAPER
+            and observation.entry_price_source is StrategyEntryPriceSource.OBSERVED_FILL
+        )
         runtime_total = runtime_replay + runtime_paper + runtime_broker_paper
         existing_total = (
             existing.replay_observations
@@ -735,6 +746,10 @@ class StrategyLearningService:
                 "broker_paper_observations": max(
                     existing.broker_paper_observations,
                     runtime_broker_paper,
+                ),
+                "verified_broker_paper_fill_observations": max(
+                    existing.verified_broker_paper_fill_observations,
+                    runtime_verified_broker_paper_fills,
                 ),
                 "transaction_cost_model_documented": (
                     existing.transaction_cost_model_documented
