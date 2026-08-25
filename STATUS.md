@@ -85,6 +85,8 @@ Core rule: **processes recover where safe; capital permission fails closed.** Re
 - Exit evaluation is still fixed-horizon mark-to-market with explicitly modeled exit slippage; it is not represented as an observed broker exit.
 - Strategy health exposes execution-friction attribution: observed-vs-modeled entry counts, observed-fill rate, mean observed entry slippage, mean signal-to-fill latency, and the current modeled transaction-cost/entry/exit assumptions.
 - The Trading Console renders this attribution separately from symbol health. With no verified fills it displays `NO OBSERVED FILLS` and leaves actual slippage/latency unknown instead of manufacturing numbers.
+- Broker-paper total observations and verified broker-paper fills are now separate persisted promotion evidence fields. Verified fill depth is counted only from closed `BROKER_PAPER` observations whose entry source is an exact matched `observed-fill`.
+- LIVE promotion requires both sufficient broker-paper observation depth and sufficient verified broker-paper fill depth. Legacy broker-paper counts default to zero verified fills and are never retroactively relabeled.
 - Runtime never self-modifies strategy code/parameters or automatically skips promotion stages.
 
 ## Latest verification baseline
@@ -119,6 +121,16 @@ Local evidence:
 - Trading Console container commit `6dd56400fd54f6d780a615dc2e8a72d547c3f605` and renderer commit `b9162c6dc9137a33334feed89179d756c4a312f8` expose observed-fill coverage, actual entry slippage/latency, and modeled cost/entry/exit assumptions without adding any write endpoint.
 - Exact-head CI `#510` on `b9162c6dc9137a33334feed89179d756c4a312f8` completed successfully: Ruff, full pytest, compileall, engineering-skill verification on Python 3.12 and 3.13, plus Docker build all passed.
 
+### Verified broker-paper fill gate for LIVE promotion
+
+- Promotion RED commit `72e3f3c5a429365e73013766e9aa603f3e505abf`, CI `#514`: full pytest produced exactly `1 failed, 239 passed`; the failure demonstrated that `broker_paper_observations=50` with zero verified fills was incorrectly accepted for LIVE promotion.
+- Learning-sync RED commit `5d5e0b1db834bf47e104c730a317679fbc603110`, CI `#516`: full pytest produced exactly `2 failed, 239 passed`, proving both the missing verified-fill evidence field and missing broker-paper exact-fill synchronization.
+- Evidence model commit `e7187ffee5f433c7ab8fbaceea5145a04452f503` adds a separate non-negative `verified_broker_paper_fill_observations` field.
+- LIVE gate commit `39b64d274d8d034bc732e978941e78c29183da7b` requires verified broker-paper fill depth to meet the configured broker-paper minimum in addition to total broker-paper observations.
+- Learning sync commit `3c1846a55e2069cf0ac7d5040a13f8ee22880184` counts verified depth only from closed `BROKER_PAPER` observations with exact matched `observed-fill` entry provenance.
+- CI `#522` on `3c1846a55e2069cf0ac7d5040a13f8ee22880184` completed successfully: Ruff, full pytest, compileall, engineering-skill verification on Python 3.12 and 3.13, plus Docker build all passed.
+- `PROJECT_DIRECTION.md` now makes the distinction durable policy: broker-paper mode/count alone cannot satisfy LIVE validation, and historical evidence cannot be retroactively relabeled as verified broker execution.
+
 The status-only commit that records this baseline must itself remain CI-clean before becoming the next exact-head baseline.
 
 ## Ecosystem intelligence state
@@ -140,20 +152,19 @@ No external repository is integrated merely because it is new or popular. Every 
 ## Immediate engineering queue
 
 1. Preserve exact-head CI on the current branch after this status update.
-2. Evaluate tightening LIVE promotion so broker-paper sample counts cannot stand in for verified observed broker-paper fills; use the new exact-fill provenance rather than retroactively relabeling old evidence.
-3. Continue Alpaca WebSocket resilience review, but do not add a naive fixed stock-bar silence timeout that would misclassify market-closed periods; require session/provider-aware evidence first.
-4. Collect real NVDA/SPCX/KLAC observed-fill and coverage evidence in monitor-only/paper-safe or broker-paper configuration when runtime credentials are available outside Git.
-5. Extend execution-friction evidence toward observed exit fills only when an auditable entry-to-exit execution identity exists; keep fixed-horizon exits explicitly modeled until then.
-6. Evaluate FINRA/off-exchange evidence with explicit source, reporting-latency, classification, and provenance methodology.
-7. Keep auditing broker mutation/recovery endpoints for definite-vs-ambiguous outcomes and post-disconnect execution recovery.
-8. Keep PR #8 Draft until strategy evidence and operational readiness justify otherwise.
+2. Continue Alpaca WebSocket resilience review, but do not add a naive fixed stock-bar silence timeout that would misclassify market-closed periods; require session/provider-aware evidence first.
+3. Collect real NVDA/SPCX/KLAC observed-fill and coverage evidence in monitor-only/paper-safe or broker-paper configuration when runtime credentials are available outside Git; verified broker-paper fills, not mode labels alone, are now required for LIVE evidence depth.
+4. Extend execution-friction evidence toward observed exit fills only when an auditable entry-to-exit execution identity exists; keep fixed-horizon exits explicitly modeled until then.
+5. Evaluate FINRA/off-exchange evidence with explicit source, reporting-latency, classification, and provenance methodology.
+6. Keep auditing broker mutation/recovery endpoints for definite-vs-ambiguous outcomes and post-disconnect execution recovery.
+7. Keep PR #8 Draft until strategy evidence and operational readiness justify otherwise.
 
 ## Known blockers / intentionally unfinished
 
 - No current strategy is approved for autonomous live capital.
 - Real broker credentials are never stored in Git.
 - Real Alpaca end-to-end NVDA/SPCX/KLAC runtime evidence has not been produced from this execution environment.
-- Current broker-paper observation counts are not yet separately gated by verified observed-fill depth for LIVE promotion; this is the next evidence-hardening candidate.
+- Verified broker-paper fill depth is currently insufficient for LIVE promotion; legacy broker-paper counts do not satisfy the new gate.
 - Fixed-horizon exit evaluation remains modeled; no observed broker exit is claimed without an auditable entry-to-exit execution identity.
 - Dark-pool/off-exchange evidence is not yet integrated.
 - Walk-forward/OOS evidence is still insufficient for live promotion.
