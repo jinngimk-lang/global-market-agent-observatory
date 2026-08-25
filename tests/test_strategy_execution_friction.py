@@ -178,3 +178,53 @@ def test_unmatched_fill_cannot_contaminate_strategy_execution_provenance(tmp_pat
     assert observation.observed_entry_slippage_bps is None
     assert observation.execution_latency_seconds is None
     assert observation.execution_client_order_id is None
+
+
+def test_broker_paper_evidence_counts_only_exact_verified_fills(tmp_path) -> None:
+    database = tmp_path / "broker-paper-friction.db"
+    store = SQLiteStrategyLearningStore(database)
+    evidence_store = SQLiteStrategyEvidenceStore(database)
+    learning = StrategyLearningService(
+        store=store,
+        evidence_store=evidence_store,
+        mode=TradingMode.BROKER_PAPER,
+        evaluation_horizon_seconds=60,
+        transaction_cost_bps=Decimal("10"),
+    )
+
+    first = candle(0, "100")
+    first_signal = signal(first.close_time)
+    learning.observe_cycle(
+        first,
+        TradingCycleResult(symbol="NVDA", signals=[first_signal]),
+    )
+    learning.observe_cycle(candle(1, "101"), TradingCycleResult(symbol="NVDA"))
+
+    third = candle(2, "100")
+    third_signal = signal(third.close_time)
+    client_order_id = "broker-paper-verified-fill"
+    allocation = allocation_for(third_signal, client_order_id)
+    execution = ExecutionResult(
+        client_order_id=client_order_id,
+        broker_order_id="broker-paper-1",
+        status=OrderStatus.FILLED,
+        filled_quantity=Decimal("10"),
+        filled_price=Decimal("100.10"),
+        observed_at=third_signal.generated_at + timedelta(seconds=1),
+    )
+    learning.observe_cycle(
+        third,
+        TradingCycleResult(
+            symbol="NVDA",
+            signals=[third_signal],
+            allocations=[allocation],
+            executions=[execution],
+        ),
+    )
+    learning.observe_cycle(candle(3, "101"), TradingCycleResult(symbol="NVDA"))
+
+    evidence = evidence_store.get("vwap", "1.0.0")
+
+    assert evidence is not None
+    assert evidence.broker_paper_observations == 2
+    assert evidence.verified_broker_paper_fill_observations == 1
