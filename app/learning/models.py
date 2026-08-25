@@ -21,6 +21,11 @@ class StrategyEvaluationPartition(StrEnum):
     HOLDOUT = "holdout"
 
 
+class StrategyEntryPriceSource(StrEnum):
+    MODELED = "modeled"
+    OBSERVED_FILL = "observed-fill"
+
+
 class StrategyHealthPolicy(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -57,6 +62,13 @@ class StrategyObservation(BaseModel):
     observed_at: datetime
     due_at: datetime
     transaction_cost_bps: Decimal
+    signal_entry_price: Decimal | None = None
+    entry_price_source: StrategyEntryPriceSource = StrategyEntryPriceSource.MODELED
+    modeled_entry_slippage_bps: Decimal = Decimal("0")
+    modeled_exit_slippage_bps: Decimal = Decimal("0")
+    observed_entry_slippage_bps: Decimal | None = None
+    execution_latency_seconds: Decimal | None = None
+    execution_client_order_id: str | None = None
     market_regime: str | None = None
     evaluation_partition: StrategyEvaluationPartition = StrategyEvaluationPartition.UNASSIGNED
     walk_forward_fold: int | None = None
