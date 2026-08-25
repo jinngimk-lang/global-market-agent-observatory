@@ -227,6 +227,11 @@ class StrategyPromotionGate:
         blockers: list[str] = []
         if evidence.broker_paper_observations < self.policy.min_broker_paper_observations:
             blockers.append("insufficient_broker_paper_observations")
+        if (
+            evidence.verified_broker_paper_fill_observations
+            < self.policy.min_broker_paper_observations
+        ):
+            blockers.append("insufficient_verified_broker_paper_fills")
         if not evidence.reconciliation_verified:
             blockers.append("reconciliation_unverified")
         if not evidence.degradation_rule_defined:
