@@ -444,6 +444,8 @@ Required validation layers:
 
 Do not promote a strategy to live solely because its in-sample backtest is profitable.
 
+Broker-paper runtime observation count and verified broker-fill evidence are separate validation dimensions. LIVE promotion must require sufficient broker-paper observations whose entry provenance is an exact matched, authoritative broker fill; merely running a strategy in `broker-paper` mode, or possessing legacy broker-paper counts without fill provenance, cannot satisfy this gate. Historical evidence must not be retroactively relabeled as verified execution evidence.
+
 ## Delivery Order
 
 The intended implementation sequence is:
