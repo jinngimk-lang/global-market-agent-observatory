@@ -61,6 +61,8 @@ class Settings(BaseModel):
     strategy_improvement_interval_seconds: float = 30.0
     strategy_evaluation_horizon_seconds: float = 300.0
     strategy_transaction_cost_bps: Decimal = Decimal("10")
+    strategy_modeled_entry_slippage_bps: Decimal = Decimal("0")
+    strategy_modeled_exit_slippage_bps: Decimal = Decimal("0")
     strategy_degradation_min_observations: int = 30
     strategy_degradation_window_observations: int = 50
     strategy_degradation_min_expectancy_after_costs: Decimal = Decimal("0")
@@ -157,11 +159,15 @@ class Settings(BaseModel):
             raise ValueError("OPTIONS_EXPIRATION_HORIZON_DAYS must be positive")
         return value
 
-    @field_validator("strategy_transaction_cost_bps")
+    @field_validator(
+        "strategy_transaction_cost_bps",
+        "strategy_modeled_entry_slippage_bps",
+        "strategy_modeled_exit_slippage_bps",
+    )
     @classmethod
     def validate_strategy_costs(cls, value: Decimal) -> Decimal:
         if value < 0:
-            raise ValueError("STRATEGY_TRANSACTION_COST_BPS must be non-negative")
+            raise ValueError("strategy execution friction bps must be non-negative")
         return value
 
     @field_validator(
@@ -313,6 +319,12 @@ class Settings(BaseModel):
             ),
             strategy_transaction_cost_bps=Decimal(
                 os.getenv("STRATEGY_TRANSACTION_COST_BPS", "10")
+            ),
+            strategy_modeled_entry_slippage_bps=Decimal(
+                os.getenv("STRATEGY_MODELED_ENTRY_SLIPPAGE_BPS", "0")
+            ),
+            strategy_modeled_exit_slippage_bps=Decimal(
+                os.getenv("STRATEGY_MODELED_EXIT_SLIPPAGE_BPS", "0")
             ),
             strategy_degradation_min_observations=int(
                 os.getenv("STRATEGY_DEGRADATION_MIN_OBSERVATIONS", "30")
