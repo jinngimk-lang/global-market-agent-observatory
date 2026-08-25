@@ -24,11 +24,15 @@ class FakeWebSocket:
 class FakeConnection:
     def __init__(self, websocket: FakeWebSocket) -> None:
         self.websocket = websocket
+        self.exited = False
+        self.exit_exception_type = None
 
     async def __aenter__(self) -> FakeWebSocket:
         return self.websocket
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
+        self.exited = True
+        self.exit_exception_type = exc_type
         return None
 
 
@@ -107,6 +111,29 @@ async def test_authentication_failure_fails_closed() -> None:
 
     with pytest.raises(RuntimeError, match="authentication"):
         [item async for item in feed.stream(limit=1)]
+
+
+@pytest.mark.asyncio
+async def test_authentication_failure_exits_connection_context_for_cleanup() -> None:
+    websocket = FakeWebSocket(
+        [
+            '[{"T":"success","msg":"connected"}]',
+            '[{"T":"error","code":402,"msg":"auth failed"}]',
+        ]
+    )
+    connection = FakeConnection(websocket)
+    feed = AlpacaStockBarFeed(
+        symbols={"NVDA"},
+        api_key="bad-key",
+        api_secret="bad-secret",
+        connect=lambda _: connection,
+    )
+
+    with pytest.raises(RuntimeError, match="authentication"):
+        [item async for item in feed.stream(limit=1)]
+
+    assert connection.exited is True
+    assert connection.exit_exception_type is RuntimeError
 
 
 def test_feed_requires_symbols_and_credentials() -> None:
