@@ -36,11 +36,12 @@ Core operating rule:
 
 ## Governance now in force
 
-- `PROJECT_DIRECTION.md` is a living long-horizon compass and now includes autonomous project ownership plus permanent Continuous Ecosystem Intelligence / Phase 7.
+- `PROJECT_DIRECTION.md` is a living long-horizon compass and includes autonomous project ownership plus permanent Continuous Ecosystem Intelligence / Phase 7.
 - `docs/AUTONOMOUS_OWNER_GOVERNANCE.md` defines normal repository autonomy, direction stewardship, upstream intake, license/security/provenance requirements, skill/MCP/connector policy, and project-completeness rules.
-- `AGENTS.md` now requires future agents to recover this governance and to inspect relevant upstream changes before material implementation work.
+- `AGENTS.md` requires future agents to recover this governance and inspect relevant upstream changes before material implementation work.
 - Normal reversible evidence-backed repository decisions should be made autonomously without repeatedly asking the user.
 - Repository autonomy does not grant permission to expose secrets, make paid purchases/legal commitments, perform irreversible external actions, disclose sensitive findings, bypass deterministic risk, promote strategy stages without evidence, or enable live capital merely because a broker/tool supports it.
+- `Trading Ecosystem Watch` runs as an hourly condition-based delta monitor and uses the same intake/test/provenance gate before any repository integration.
 
 ## Trading/runtime capabilities completed
 
@@ -52,6 +53,7 @@ Core operating rule:
 - Deterministic risk is mandatory before execution.
 - ACTIVE / REDUCING / HALTED state is persisted across restart.
 - Unknown execution outcomes reconcile before retry; ambiguous results are not treated as definite failures.
+- Alpaca submit/cancel and IBKR submit/confirmation/cancel now explicitly classify HTTP 408/429 as `UNKNOWN` mutation outcomes rather than definite `REJECTED` outcomes; transport errors and 5xx remain reconciliation-required UNKNOWN paths.
 - Idempotent client-order identifiers and persistent completed-cycle checkpoints prevent duplicate decisions/orders.
 - Feed/cycle failures can HALT capital permission while process recovery/reconnect continues.
 - Append-only audit records strategy, risk, execution, reconciliation, and kill-switch transitions.
@@ -64,7 +66,7 @@ Core operating rule:
 - HALT persists and is audited.
 - ACTIVATE cannot promote a strategy or bypass promotion eligibility.
 - ACTIVATE is rejected while the runtime strategy-health gate is degraded.
-- The lifecycle-race regression test was corrected so health is changed after application startup; production semantics remain request-time health truth.
+- The lifecycle-race regression test changes simulated health after application startup; production semantics remain request-time health truth.
 
 ### Market data and resilient loops
 
@@ -117,7 +119,7 @@ A replay BTC chart is explicitly separated from US-equity coverage and is never 
 
 ## Latest verified CI
 
-CI `#428` on commit `b6834ead3ea22cf05b6ffc64221cac0eaab98c24` completed successfully after the operator-control lifecycle test correction.
+CI `#450` on commit `06737299996dfbc97df9fc588ff2277a45a4eec2` completed successfully after the broker mutation-outcome hardening.
 
 Verified by that run:
 
@@ -128,9 +130,7 @@ Verified by that run:
 - required engineering-skill check;
 - Docker build.
 
-At the prior failed run, the only failure was `test_activation_is_blocked_while_strategy_health_is_degraded`: the test changed the health gate before `TestClient` startup and the continuous-improvement startup path legitimately recalculated it. The corrected test changes the simulated degraded health inside the active lifespan, then proves ACTIVATE returns 409. No production bypass was added.
-
-The documentation/governance commits after CI #428 trigger a newer CI and must be verified before those commits are described as fully green.
+The RED run immediately before the fix produced 10 targeted failures in `tests/test_broker_mutation_outcomes.py`: Alpaca submit/cancel and IBKR submit/confirmation/cancel treated HTTP 408/429 as `REJECTED`. The GREEN implementation routes those ambiguous mutation responses to provider-specific `UNKNOWN` results so reconciliation must establish broker truth before retry. No NautilusTrader source code was copied; the upstream LGPL project was used as conceptual evidence only.
 
 ## Ecosystem intelligence state
 
@@ -138,24 +138,24 @@ First governed ecosystem scan is recorded in `docs/upstream/2026-08-25-ecosystem
 
 Current upstream evidence queue:
 
-1. **NautilusTrader `d2b1221...`** — classify transport outcomes before rolling back pending commands; preserve ambiguous state for reconciliation. Strongly aligned with our UNKNOWN-execution architecture. NautilusTrader is LGPL-3.0, so conceptual reuse is preferred unless a future isolated adaptation deliberately satisfies license obligations.
+1. **NautilusTrader `d2b1221...`** — transport-outcome classification pattern. The concrete local Alpaca/IBKR 408/429 mutation gap has now been closed and verified by CI #450. Continue applying the invariant to future broker mutation endpoints.
 2. **NautilusTrader `6cb6afc...`** — atomic WebSocket subscription state, request/connection epoch correlation, desired-subscription replay on reconnect. Evaluate only if local failure-injection exposes a concrete gap.
-3. **Alpaca Python SDK `8b466396...`** — reconnect jitter, half-open socket cleanup, optional connected-but-mute timeout, control-vs-market-frame separation. Alpaca SDK is Apache-2.0. Review our Alpaca feed with RED tests before adopting any behavior.
+3. **Alpaca Python SDK `8b466396...`** — reconnect jitter, half-open socket cleanup, optional connected-but-mute timeout, control-vs-market-frame separation. Alpaca SDK is Apache-2.0. Review our Alpaca feed with local failure-injection before adopting behavior.
 4. **QuantConnect LEAN `78232af...`** — backup live-universe source pattern. LEAN is Apache-2.0. We will not silently substitute backup data for safety-critical primary truth; any fallback must retain explicit provenance and fail-closed risk semantics.
 5. **QuantConnect LEAN `09e96f...`** — duplicate shared-bar correctness fix independently supports our existing revision/completed-cycle invariant; no local change needed now.
 
-An hourly condition-based ecosystem watch is configured externally to inspect relevant public GitHub/provider/security developments and remain silent when nothing material changes. Any integration still has to pass the repository intake gate and CI; monitoring does not mean uncontrolled mutation.
+The hourly ecosystem watch remains silent when there is no material delta. Monitoring does not mean uncontrolled mutation: every integration still passes relevance, license/security, provenance, RED/GREEN, and exact-head CI gates.
 
 ## Immediate engineering queue
 
 Priority order is now:
 
-1. Audit every Alpaca/IBKR execution command path for explicit definite-vs-ambiguous outcome classification before pending state is cleared or retry is possible.
-2. Review Alpaca WebSocket connect/auth/reconnect lifecycle against the latest upstream reliability findings: half-open cleanup, jitter bounds, and opt-in silence detection; add local failure-injection tests before changing production behavior.
-3. Expand prospective OOS/walk-forward evidence with regime segmentation, realistic costs/slippage/latency, and provenance without retroactive holdout labeling.
-4. Add regime-level strategy attribution after the completed per-symbol attribution layer.
-5. Verify real NVDA/SPCX/KLAC market coverage end-to-end in monitor-only/paper-safe Alpaca configuration when runtime credentials are available outside Git.
-6. Evaluate FINRA/off-exchange evidence with source/reporting-latency/classification methodology before integration.
+1. Review Alpaca WebSocket connect/auth/reconnect lifecycle against the latest upstream reliability findings: prove half-open cleanup behavior, evaluate bounded jitter, and keep any connected-but-mute timeout opt-in and cadence-aware. Add local failure-injection tests before changing production behavior.
+2. Expand prospective OOS/walk-forward evidence with regime segmentation, realistic costs/slippage/latency, and provenance without retroactive holdout labeling.
+3. Add regime-level strategy attribution after the completed per-symbol attribution layer.
+4. Verify real NVDA/SPCX/KLAC market coverage end-to-end in monitor-only/paper-safe Alpaca configuration when runtime credentials are available outside Git.
+5. Evaluate FINRA/off-exchange evidence with source/reporting-latency/classification methodology before integration.
+6. Keep auditing any new broker mutation endpoint for definite-vs-ambiguous outcome semantics before it can clear pending state or retry.
 7. Keep PR #8 Draft until evidence and operational readiness justify a different state.
 
 ## Known blockers / intentionally unfinished
@@ -166,7 +166,6 @@ Priority order is now:
 - Dark-pool/off-exchange evidence is not yet integrated.
 - Walk-forward/OOS evidence is not sufficient for live promotion.
 - Alpaca reconnect jitter/half-open cleanup has not yet been locally regression-tested against our implementation.
-- Complete command-by-command ambiguous-outcome audit across both live broker adapters is still pending.
 
 ## Future-agent rule
 
