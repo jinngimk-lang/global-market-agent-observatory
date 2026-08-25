@@ -12,15 +12,13 @@ When resuming after context pressure, a new session, an agent handoff, or uncert
 2. `STATUS.md` — current branch/workstream state, completed work, blockers, and immediate next steps.
 3. `AGENTS.md` — repository operating rules.
 4. `docs/AUTONOMOUS_OWNER_GOVERNANCE.md` — autonomous project-owner authority and ecosystem-intelligence intake gate.
-5. `docs/INNOVATION_DOCTRINE.md` — innovation/reframing method and strategy-promotion doctrine when relevant.
+5. `docs/INNOVATION_DOCTRINE.md` when changing strategy, architecture, integration, safety, or durable workflow.
 6. `CONTEXT.md` plus the newest relevant ADR/spec/plan/decision/upstream record.
 7. Current branch, PR/CI evidence, and latest materially relevant upstream/provider changes.
 
-Do not ask the user to repeat durable direction already recorded here.
+Do not ask the user to repeat durable direction already recorded in the repository.
 
-## Current product state
-
-This repository is the primary autonomous market-monitoring and trading platform workstream.
+## Current operating model
 
 Primary runtime chain:
 
@@ -30,156 +28,117 @@ Permanent maintenance chain:
 
 `ecosystem discovery -> verification -> license/security review -> smallest useful integration -> RED/GREEN -> full CI -> provenance -> direction/status update`
 
-Core operating rule:
+Core rule: **processes recover where safe; capital permission fails closed.** Repository autonomy, broker capability, data quality, strategy maturity, strategy health, deterministic risk, operator state, and live-capital permission are separate gates.
 
-**Processes recover where safe; capital permission fails closed.** Runtime liveness, broker capability, strategy maturity, strategy health, and operator activation are independent gates.
+`Trading Ecosystem Watch` uses delta-based public/official research and may integrate normal reversible improvements without repeated user approval, but no skill/MCP/upstream project can bypass deterministic risk, promotion evidence, reconciliation, secret boundaries, or explicit live enablement.
 
-## Governance now in force
+## Completed runtime capabilities
 
-- `PROJECT_DIRECTION.md` is a living long-horizon compass and includes autonomous project ownership plus permanent Continuous Ecosystem Intelligence / Phase 7.
-- `docs/AUTONOMOUS_OWNER_GOVERNANCE.md` defines normal repository autonomy, direction stewardship, upstream intake, license/security/provenance requirements, skill/MCP/connector policy, and project-completeness rules.
-- `AGENTS.md` requires future agents to recover this governance and inspect relevant upstream changes before material implementation work.
-- Normal reversible evidence-backed repository decisions should be made autonomously without repeatedly asking the user.
-- Repository autonomy does not grant permission to expose secrets, make paid purchases/legal commitments, perform irreversible external actions, disclose sensitive findings, bypass deterministic risk, promote strategy stages without evidence, or enable live capital merely because a broker/tool supports it.
-- `Trading Ecosystem Watch` runs as an hourly condition-based delta monitor and uses the same intake/test/provenance gate before any repository integration.
+### Execution and safety
 
-## Trading/runtime capabilities completed
-
-### Safety and execution
-
-- Explicit `replay`, `paper`, `broker-paper`, and `live` modes.
+- Explicit `replay`, `paper`, `broker-paper`, and `live` modes; live remains OFF by default.
 - Execution providers: local paper, Alpaca, IBKR.
-- Live execution requires explicit enablement/confirmation and remains OFF by default.
-- Deterministic risk is mandatory before execution.
-- ACTIVE / REDUCING / HALTED state is persisted across restart.
-- Unknown execution outcomes reconcile before retry; ambiguous results are not treated as definite failures.
-- Alpaca submit/cancel and IBKR submit/confirmation/cancel explicitly classify HTTP 408/429 as `UNKNOWN` mutation outcomes rather than definite `REJECTED` outcomes; transport errors and 5xx remain reconciliation-required UNKNOWN paths.
-- IBKR client-order reconciliation now checks open orders first, then recent execution history when the order is no longer open, and finally verifies terminal broker state through the order-status endpoint before clearing ambiguity. Trade history is a recovery locator, not proof of a full fill.
-- Idempotent client-order identifiers and persistent completed-cycle checkpoints prevent duplicate decisions/orders.
-- Feed/cycle failures can HALT capital permission while process recovery/reconnect continues.
+- Deterministic risk approval is mandatory before every execution path.
+- ACTIVE / REDUCING / HALTED state persists across restart.
+- Idempotent client-order identifiers and completed-cycle checkpoints prevent duplicate decisions/orders.
+- Alpaca submit/cancel and IBKR submit/confirmation/cancel classify HTTP 408/429 as ambiguous `UNKNOWN`, not definite rejection.
+- Unknown execution outcomes reconcile before retry; feed/cycle failures can HALT capital while process recovery continues.
+- IBKR reconciliation now checks open orders first, then recent execution history when an order has disappeared from the open-order view, then confirms authoritative terminal state via the order-status endpoint. Trade history is a recovery locator, never proof of a full fill.
 - Append-only audit records strategy, risk, execution, reconciliation, and kill-switch transitions.
 
-### Authenticated operator controls
+### Operator controls
 
-- `OPERATOR_API_TOKEN` is a dedicated secret, independent of broker keys.
-- `/api/operator/halt` and `/api/operator/activate` use Bearer authentication with constant-time token comparison.
-- Missing operator token fails closed.
+- Dedicated `OPERATOR_API_TOKEN`, separate from broker credentials.
+- Authenticated `/api/operator/halt` and `/api/operator/activate`.
+- Missing/wrong authentication fails closed.
 - HALT persists and is audited.
-- ACTIVATE cannot promote a strategy or bypass promotion eligibility.
-- ACTIVATE is rejected while the runtime strategy-health gate is degraded.
-- The lifecycle-race regression test changes simulated health after application startup; production semantics remain request-time health truth.
+- ACTIVATE cannot bypass promotion or degraded strategy-health gates.
 
-### Market data and resilient loops
+### Market data and structure
 
-- Alpaca multi-symbol stock minute bars.
-- Replay restart resumes from the last persisted candle rather than moving synthetic time backward.
-- Updated/revised bars update history but do not create duplicate trade decisions.
-- Market-feed reconnect supervisor uses bounded exponential backoff and records failure state.
-- Browser stream separates JSON/transport errors from chart rendering errors and ignores old out-of-order candles per symbol+interval.
-- Runtime loop liveness/failures are visible read-only.
+- Alpaca multi-symbol stock minute bars plus deterministic replay.
+- Revised bars update history without creating duplicate trading decisions.
+- Market-feed reconnect supervisor uses bounded exponential backoff and exposes failure state.
+- Browser stream separates transport/JSON errors from rendering errors and ignores stale out-of-order bars.
 - `/api/market/coverage` separates raw feed FRESH/STALE/MISSING from strategy-cycle OBSERVED/WAITING/ERROR.
-
-### Market structure and options
-
 - VWAP / anchored VWAP, volume profile, order-flow imbalance.
-- Transparent GEX proxy, gamma flip, put-wall and call-wall estimates with explicit methodology/provenance.
-- Alpaca option contract/open-interest data joins option snapshot Greeks/IV.
-- Options structure has freshness/TTL semantics and invalidates stale/failed data.
-- `TradingCycleResult` retains the exact structure used by the strategy.
-- `/api/market/structure` exposes that exact strategy-used snapshot rather than recomputing a different view.
-- Missing values remain missing; inferred values are not presented as direct fact.
+- Options OI + snapshot Greeks/IV with transparent GEX proxy, gamma flip, put/call wall estimates and methodology/provenance.
+- Options structure has TTL/freshness invalidation.
+- `TradingCycleResult` and `/api/market/structure` expose the exact structure consumed by strategy logic rather than recomputing a different view.
 
 ### Strategy evidence and promotion
 
-- Versioned hypothesis manifests and canonical maturity path: `idea -> research -> replay -> paper -> broker-paper -> live`.
-- Runtime promotion gate validates exact strategy/version evidence and fails closed on missing/mismatched evidence.
-- Continuous learning settles observations only after future prices arrive and applies configured transaction costs.
-- Prospective walk-forward partitioning exists: calibration/holdout/fold assignment is fixed before outcomes are known; historical unassigned observations cannot be retrospectively relabeled as OOS.
-- OOS holdout sample/fold thresholds are wired from `Settings` into both evidence generation and promotion policy.
-- Strategy observations now lock a prospective market-regime label from the exact strategy-used structure before outcome settlement. Current regime key combines gamma sign with VWAP location.
-- Strategy health includes per-symbol and per-regime attribution with sample count, net expectancy, win rate, and drawdown.
-- A sufficiently sampled degraded symbol can degrade overall strategy health; regime-local degradation remains attribution evidence and does not silently become a global kill condition.
-- Health recovery does not automatically reactivate REDUCING/HALTED state.
+- Versioned hypothesis manifests and maturity path `idea -> research -> replay -> paper -> broker-paper -> live`.
+- Runtime promotion validates exact strategy/version evidence and fails closed on missing or mismatched evidence.
+- Continuous learning settles observations only after future prices arrive and includes configured transaction costs.
+- Prospective walk-forward calibration/holdout/fold assignment is fixed before outcomes are known; historical unassigned observations cannot be relabeled as OOS.
+- OOS thresholds are shared by evidence generation and promotion policy.
+- Strategy observations prospectively lock market regime from the exact strategy-used structure before outcome settlement; current regime key combines gamma sign with VWAP location.
+- Health exposes per-symbol and per-regime sample count, expectancy, win rate, and drawdown.
+- Regime-local degradation remains attribution evidence and does not silently become a global kill condition.
+- Held-out OOS regime attribution uses only holdout observations from completed walk-forward folds. Calibration observations, historical `UNASSIGNED` observations, and incomplete folds cannot contaminate OOS regime metrics.
+- Each OOS regime independently reports holdout sample count, completed folds, expectancy, drawdown, win rate, and `verified`; global OOS sufficiency does not imply per-regime sufficiency.
 - Runtime never self-modifies strategy code/parameters or automatically skips promotion stages.
 
-### Trading Console
+## Latest verification baseline
 
-The old Observatory showcase has been removed from the main UI. The console focuses on:
+### IBKR disconnect-fill recovery
 
-- system/trading/promotion state;
-- NVDA/SPCX/KLAC and current-feed symbol switching;
-- per-symbol feed coverage and strategy-cycle state;
-- exact strategy-used VWAP / OFI / Put Wall estimate / Call Wall estimate / Net GEX Proxy and freshness/provenance;
-- strategy action/confidence/rationale/invalidation;
-- allocation/risk/execution outcomes;
-- positions/P&L and audit chain;
-- strategy promotion and health;
-- per-symbol strategy attribution;
-- runtime-loop liveness.
+External trigger: QuantConnect `Lean.Brokerages.InteractiveBrokers#249` (opened 2026-08-04) describes fills that can be missed across IBKR 1100 disconnect windows unless execution history is explicitly recovered. QuantConnect repository license is Apache-2.0; no source was copied.
 
-A replay BTC chart is explicitly separated from US-equity coverage and is never presented as proof that NVDA/SPCX/KLAC are receiving live data.
+Local evidence:
 
-## Latest verification state
+- RED commit `f2133487bc6f0d2487ead646550120064b6d541f`, CI `#458`: Ruff passed; full pytest produced exactly `1 failed, 228 passed`, proving the adapter stopped at the open-order view.
+- Test strengthened at `0459b6be1cfc3d4bab3475242af50245a079cb08` to require terminal order-status truth after trade-history identification.
+- GREEN implementation `06d809259fba3cf9d0b4fdcf6f5f493534cbba56` adds open-order -> trade-history -> order-status recovery with fail-closed UNKNOWN behavior on ambiguity.
+- Provenance: `docs/upstream/2026-08-25-ibkr-disconnect-fill-recovery.md`.
 
-IBKR disconnect-fill recovery RED:
+### Prospective and OOS regime attribution
 
-- commit `f2133487bc6f0d2487ead646550120064b6d541f`;
-- CI `#458`;
-- Ruff passed and full pytest reported exactly `1 failed, 228 passed` because the adapter stopped after the open-order query instead of consulting execution history.
+- Prospective regime model commit `83784fbedb2f2183de359ac647850ef75098c9bb`.
+- Prospective regime service commit `56d702ed29975ee16275cc46f11e9bda9865bc42`.
+- OOS regime RED commit `b2fe194c0444bf009bd9c82ae39faa1affeb0c3d` requires only held-out observations from completed folds and independent per-regime evidence sufficiency.
+- OOS model commit `38aa571033c4772707659c57305a0bc40f3124d2`.
+- OOS service commit `042228bafc3f6cba916b483ae9f763400e65a731`.
+- Exact-head CI `#478` on `042228bafc3f6cba916b483ae9f763400e65a731` completed successfully: Ruff, full pytest, compileall, engineering-skill verification on Python 3.12 and 3.13, plus Docker build all passed.
 
-The test was strengthened at `0459b6be1cfc3d4bab3475242af50245a079cb08` to require broker terminal-order status after trade-history identification, preventing a partial execution from being mislabeled as a full fill.
-
-IBKR GREEN implementation:
-
-- commit `06d809259fba3cf9d0b4fdcf6f5f493534cbba56`;
-- exact-head CI `#464` confirmed the IBKR recovery regression no longer failed; that run was blocked only by two independent regime-attribution RED tests already present in the branch.
-
-Regime-attribution GREEN:
-
-- model commit `83784fbedb2f2183de359ac647850ef75098c9bb`;
-- service commit `56d702ed29975ee16275cc46f11e9bda9865bc42`;
-- CI `#468` passed Ruff, full pytest, compileall, and engineering-skill verification on both Python 3.12 and 3.13. Docker was still completing when this status update was written.
-
-Provenance for the IBKR recovery change is recorded in `docs/upstream/2026-08-25-ibkr-disconnect-fill-recovery.md`. The final head after this status/provenance update must pass the complete CI, including Docker, before it is treated as the new verified baseline.
+The status-only commit that records this baseline must itself remain CI-clean before becoming the next exact-head baseline.
 
 ## Ecosystem intelligence state
 
-The governed ecosystem scan is recorded in `docs/upstream/2026-08-25-ecosystem-scan.md`; the IBKR disconnect-fill recovery follow-up is recorded separately in `docs/upstream/2026-08-25-ibkr-disconnect-fill-recovery.md`.
+Canonical scan: `docs/upstream/2026-08-25-ecosystem-scan.md`.
+IBKR follow-up: `docs/upstream/2026-08-25-ibkr-disconnect-fill-recovery.md`.
 
-Current upstream evidence queue:
+Current evidence queue:
 
-1. **QuantConnect Interactive Brokers issue #249 (2026-08-04)** — reports fill events that can be missed across IBKR 1100 disconnect windows without explicit execution-history recovery. The local Client Portal adapter now addresses the analogous open-order blind spot by using official IBKR trade history to recover broker order identity and the official order-status endpoint to verify terminal truth. QuantConnect's repository is Apache-2.0; no source code was copied.
-2. **NautilusTrader `d2b1221...`** — transport-outcome classification pattern. The concrete local Alpaca/IBKR 408/429 mutation gap is closed. Continue applying the invariant to future broker mutation endpoints.
-3. **NautilusTrader `6cb6afc...`** — atomic WebSocket subscription state, request/connection epoch correlation, desired-subscription replay on reconnect. Evaluate only if local failure-injection exposes a concrete gap.
-4. **Alpaca Python SDK `8b466396...`** — reconnect jitter, half-open socket cleanup, optional connected-but-mute timeout, control-vs-market-frame separation. The local half-open/auth-failure cleanup regression has already been added; continue evaluating bounded jitter and cadence-aware silence handling only when justified by a local failure.
-5. **QuantConnect LEAN `78232af...`** — backup live-universe source pattern. We will not silently substitute backup data for safety-critical primary truth; any fallback must retain explicit provenance and fail-closed risk semantics.
-6. **QuantConnect LEAN `09e96f...`** — duplicate shared-bar correctness fix independently supports the existing revision/completed-cycle invariant; no local change needed.
+1. QuantConnect IBKR issue #249 — local analogous open-order blind spot addressed with official IBKR trade-history + terminal-status recovery; continue auditing reconnect/recovery semantics.
+2. NautilusTrader `d2b1221...` — ambiguous transport outcome classification; current 408/429 broker mutation gaps are closed, preserve invariant for future mutations.
+3. NautilusTrader `6cb6afc...` — connection epoch / desired-vs-acknowledged subscription recovery; adopt only if local failure injection proves a gap.
+4. Alpaca Python SDK `8b466396...` — reconnect jitter, half-open cleanup, optional silence timeout, control/data frame separation. Half-open/auth cleanup is covered locally; jitter/silence behavior remains evidence-gated.
+5. QuantConnect LEAN `78232af...` — backup live data pattern; no invisible fallback may satisfy safety-critical live freshness.
+6. QuantConnect LEAN `09e96f...` — duplicate shared-bar correctness independently supports the existing revision/completed-cycle invariant.
 
-The ecosystem watch remains silent when there is no material delta. Monitoring does not mean uncontrolled mutation: every integration still passes relevance, license/security, provenance, RED/GREEN, and exact-head CI gates.
+No external repository is integrated merely because it is new or popular. Every external adaptation must retain provenance/license review and local RED/GREEN evidence.
 
 ## Immediate engineering queue
 
-Priority order is now:
-
-1. Complete and preserve exact-head CI after the IBKR recovery + regime-attribution + provenance/status changes.
-2. Continue Alpaca WebSocket resilience review: bounded reconnect jitter and cadence-aware connected-but-mute detection only if local failure injection proves a gap.
-3. Expand prospective OOS/walk-forward evidence with realistic costs/slippage/latency and stronger regime segmentation without retroactive holdout labeling.
-4. Verify real NVDA/SPCX/KLAC market coverage end-to-end in monitor-only/paper-safe Alpaca configuration when runtime credentials are available outside Git.
-5. Evaluate FINRA/off-exchange evidence with source/reporting-latency/classification methodology before integration.
-6. Keep auditing every new broker mutation/recovery endpoint for definite-vs-ambiguous outcome semantics and post-disconnect execution recovery before pending state can clear or retry.
-7. Keep PR #8 Draft until evidence and operational readiness justify a different state.
+1. Preserve exact-head CI on the current branch after this status update.
+2. Continue Alpaca WebSocket resilience review: bounded jitter and cadence-aware connected-but-mute detection only when local failure injection justifies change.
+3. Extend OOS evidence with realistic slippage/latency/cost modeling and regime-aware diagnostics without retroactive labeling.
+4. Verify real NVDA/SPCX/KLAC coverage in monitor-only/paper-safe Alpaca configuration when runtime credentials are available outside Git.
+5. Evaluate FINRA/off-exchange evidence with explicit source, reporting-latency, classification, and provenance methodology.
+6. Keep auditing broker mutation/recovery endpoints for definite-vs-ambiguous outcomes and post-disconnect execution recovery.
+7. Keep PR #8 Draft until strategy evidence and operational readiness justify otherwise.
 
 ## Known blockers / intentionally unfinished
 
 - No current strategy is approved for autonomous live capital.
-- Real broker credentials are not stored in Git.
+- Real broker credentials are never stored in Git.
 - Real Alpaca end-to-end NVDA/SPCX/KLAC runtime evidence has not been produced from this execution environment.
 - Dark-pool/off-exchange evidence is not yet integrated.
-- Walk-forward/OOS evidence is not sufficient for live promotion.
-- Alpaca reconnect jitter/connected-but-mute behavior has not yet been locally justified for production change.
+- Walk-forward/OOS evidence is still insufficient for live promotion.
+- Alpaca reconnect jitter/connected-but-mute behavior has not yet been justified for production change.
 
 ## Future-agent rule
 
-Do not interpret “live execution supported” as “strategy safe for live capital”. Broker capability, market-data quality, strategy evidence, health, deterministic risk, operator state, and reconciliation are independent gates.
-
-Keep improving the platform autonomously, but only integrations that reduce uncertainty and survive local evidence/CI belong in the system.
+Do not interpret “live execution supported” as “safe for live capital”. Continue improving autonomously, but only changes that reduce uncertainty and survive local evidence, provenance, and exact-head CI belong in the system.
