@@ -56,6 +56,28 @@ Our market-feed supervisor reconnects after stream failure, but the Alpaca strea
 
 Decision: evaluate with local failure-injection tests before changing implementation.
 
+### Commit `13a7f7010373db0695c18675b4d8866907b22e8c`
+
+Observed: 2026-08-25 12:41 UTC.
+Theme: rate-limit coordination and order-state preservation.
+
+Relevant upstream behavior:
+
+- coordinate transport/IP and account/route quotas rather than treating each request path independently;
+- perform rate-limit waits before request signing so pacing delay does not consume signed-request validity;
+- incorporate venue-reported limits into local pacing state;
+- preserve order state across rate-limit rejects, retries, and reconnects rather than treating pacing as permission to recreate a mutation.
+
+Local relevance:
+
+The current Alpaca and IBKR adapters do not use short-lived per-request signatures equivalent to Bybit, so the sign-after-wait detail does not justify a local production change. More importantly, the repository already classifies HTTP 429 mutation outcomes as `UNKNOWN` and requires reconciliation before retry, which protects the duplicate-order boundary this upstream fix reinforces.
+
+For future broker adapters or any explicit mutation pacing layer, rate limiting must remain subordinate to idempotency and reconciliation: pacing may delay a not-yet-sent request, but it must never reinterpret an ambiguous sent request as safe to recreate. If a future provider uses expiring request signatures, signing must happen only after pacing waits complete.
+
+License/provenance decision: conceptual reuse only. The upstream implementation is LGPL-3.0 and no source was copied.
+
+Decision: record as a durable execution-integration invariant; no local code change without a failing test demonstrating a provider-specific gap.
+
 ### Commit `ca696f9737df700246bc0e598e494ca84855218b`
 
 Theme: Interactive Brokers adaptive limit order parsing.
@@ -128,6 +150,7 @@ Priority order:
 2. Add dynamic-subscription epoch/acknowledgement machinery only if the project actually introduces runtime subscription changes; avoid premature complexity.
 3. Keep backup market-data sources explicit and provenance-preserving; never let a fallback silently satisfy a live risk freshness requirement.
 4. Continue applying definite-vs-ambiguous mutation classification to any future execution mutation endpoint.
+5. For future broker pacing, coordinate provider-defined quota scopes without weakening idempotency/reconciliation; if request signatures expire, sign only after pacing waits finish.
 
 ## License decision
 
