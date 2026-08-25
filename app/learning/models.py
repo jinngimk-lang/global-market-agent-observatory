@@ -78,6 +78,20 @@ class StrategyObservation(BaseModel):
     closed_at: datetime | None = None
 
 
+class StrategyExecutionFriction(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    closed_observations: int = 0
+    modeled_entry_observations: int = 0
+    observed_fill_observations: int = 0
+    observed_fill_rate: Decimal | None = None
+    mean_observed_entry_slippage_bps: Decimal | None = None
+    mean_execution_latency_seconds: Decimal | None = None
+    current_transaction_cost_bps: Decimal = Decimal("0")
+    current_modeled_entry_slippage_bps: Decimal = Decimal("0")
+    current_modeled_exit_slippage_bps: Decimal = Decimal("0")
+
+
 class StrategySymbolAttribution(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -128,4 +142,7 @@ class StrategyHealth(BaseModel):
     symbol_attribution: list[StrategySymbolAttribution] = Field(default_factory=list)
     regime_attribution: list[StrategyRegimeAttribution] = Field(default_factory=list)
     oos_regime_attribution: list[StrategyOOSRegimeAttribution] = Field(default_factory=list)
+    execution_friction: StrategyExecutionFriction = Field(
+        default_factory=StrategyExecutionFriction
+    )
     updated_at: datetime
