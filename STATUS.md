@@ -53,7 +53,8 @@ Core operating rule:
 - Deterministic risk is mandatory before execution.
 - ACTIVE / REDUCING / HALTED state is persisted across restart.
 - Unknown execution outcomes reconcile before retry; ambiguous results are not treated as definite failures.
-- Alpaca submit/cancel and IBKR submit/confirmation/cancel now explicitly classify HTTP 408/429 as `UNKNOWN` mutation outcomes rather than definite `REJECTED` outcomes; transport errors and 5xx remain reconciliation-required UNKNOWN paths.
+- Alpaca submit/cancel and IBKR submit/confirmation/cancel explicitly classify HTTP 408/429 as `UNKNOWN` mutation outcomes rather than definite `REJECTED` outcomes; transport errors and 5xx remain reconciliation-required UNKNOWN paths.
+- IBKR client-order reconciliation now checks open orders first, then recent execution history when the order is no longer open, and finally verifies terminal broker state through the order-status endpoint before clearing ambiguity. Trade history is a recovery locator, not proof of a full fill.
 - Idempotent client-order identifiers and persistent completed-cycle checkpoints prevent duplicate decisions/orders.
 - Feed/cycle failures can HALT capital permission while process recovery/reconnect continues.
 - Append-only audit records strategy, risk, execution, reconciliation, and kill-switch transitions.
@@ -95,8 +96,9 @@ Core operating rule:
 - Continuous learning settles observations only after future prices arrive and applies configured transaction costs.
 - Prospective walk-forward partitioning exists: calibration/holdout/fold assignment is fixed before outcomes are known; historical unassigned observations cannot be retrospectively relabeled as OOS.
 - OOS holdout sample/fold thresholds are wired from `Settings` into both evidence generation and promotion policy.
-- Strategy health includes per-symbol attribution with sample count, net expectancy, win rate, and drawdown.
-- A sufficiently sampled degraded symbol can degrade overall strategy health; tiny symbol samples report attribution without automatically tripping the strategy.
+- Strategy observations now lock a prospective market-regime label from the exact strategy-used structure before outcome settlement. Current regime key combines gamma sign with VWAP location.
+- Strategy health includes per-symbol and per-regime attribution with sample count, net expectancy, win rate, and drawdown.
+- A sufficiently sampled degraded symbol can degrade overall strategy health; regime-local degradation remains attribution evidence and does not silently become a global kill condition.
 - Health recovery does not automatically reactivate REDUCING/HALTED state.
 - Runtime never self-modifies strategy code/parameters or automatically skips promotion stages.
 
@@ -117,45 +119,54 @@ The old Observatory showcase has been removed from the main UI. The console focu
 
 A replay BTC chart is explicitly separated from US-equity coverage and is never presented as proof that NVDA/SPCX/KLAC are receiving live data.
 
-## Latest verified CI
+## Latest verification state
 
-CI `#450` on commit `06737299996dfbc97df9fc588ff2277a45a4eec2` completed successfully after the broker mutation-outcome hardening.
+IBKR disconnect-fill recovery RED:
 
-Verified by that run:
+- commit `f2133487bc6f0d2487ead646550120064b6d541f`;
+- CI `#458`;
+- Ruff passed and full pytest reported exactly `1 failed, 228 passed` because the adapter stopped after the open-order query instead of consulting execution history.
 
-- Ruff;
-- full pytest on Python 3.12;
-- full pytest on Python 3.13;
-- application compileall;
-- required engineering-skill check;
-- Docker build.
+The test was strengthened at `0459b6be1cfc3d4bab3475242af50245a079cb08` to require broker terminal-order status after trade-history identification, preventing a partial execution from being mislabeled as a full fill.
 
-The RED run immediately before the fix produced 10 targeted failures in `tests/test_broker_mutation_outcomes.py`: Alpaca submit/cancel and IBKR submit/confirmation/cancel treated HTTP 408/429 as `REJECTED`. The GREEN implementation routes those ambiguous mutation responses to provider-specific `UNKNOWN` results so reconciliation must establish broker truth before retry. No NautilusTrader source code was copied; the upstream LGPL project was used as conceptual evidence only.
+IBKR GREEN implementation:
+
+- commit `06d809259fba3cf9d0b4fdcf6f5f493534cbba56`;
+- exact-head CI `#464` confirmed the IBKR recovery regression no longer failed; that run was blocked only by two independent regime-attribution RED tests already present in the branch.
+
+Regime-attribution GREEN:
+
+- model commit `83784fbedb2f2183de359ac647850ef75098c9bb`;
+- service commit `56d702ed29975ee16275cc46f11e9bda9865bc42`;
+- CI `#468` passed Ruff, full pytest, compileall, and engineering-skill verification on both Python 3.12 and 3.13. Docker was still completing when this status update was written.
+
+Provenance for the IBKR recovery change is recorded in `docs/upstream/2026-08-25-ibkr-disconnect-fill-recovery.md`. The final head after this status/provenance update must pass the complete CI, including Docker, before it is treated as the new verified baseline.
 
 ## Ecosystem intelligence state
 
-First governed ecosystem scan is recorded in `docs/upstream/2026-08-25-ecosystem-scan.md`.
+The governed ecosystem scan is recorded in `docs/upstream/2026-08-25-ecosystem-scan.md`; the IBKR disconnect-fill recovery follow-up is recorded separately in `docs/upstream/2026-08-25-ibkr-disconnect-fill-recovery.md`.
 
 Current upstream evidence queue:
 
-1. **NautilusTrader `d2b1221...`** — transport-outcome classification pattern. The concrete local Alpaca/IBKR 408/429 mutation gap has now been closed and verified by CI #450. Continue applying the invariant to future broker mutation endpoints.
-2. **NautilusTrader `6cb6afc...`** — atomic WebSocket subscription state, request/connection epoch correlation, desired-subscription replay on reconnect. Evaluate only if local failure-injection exposes a concrete gap.
-3. **Alpaca Python SDK `8b466396...`** — reconnect jitter, half-open socket cleanup, optional connected-but-mute timeout, control-vs-market-frame separation. Alpaca SDK is Apache-2.0. Review our Alpaca feed with local failure-injection before adopting behavior.
-4. **QuantConnect LEAN `78232af...`** — backup live-universe source pattern. LEAN is Apache-2.0. We will not silently substitute backup data for safety-critical primary truth; any fallback must retain explicit provenance and fail-closed risk semantics.
-5. **QuantConnect LEAN `09e96f...`** — duplicate shared-bar correctness fix independently supports our existing revision/completed-cycle invariant; no local change needed now.
+1. **QuantConnect Interactive Brokers issue #249 (2026-08-04)** — reports fill events that can be missed across IBKR 1100 disconnect windows without explicit execution-history recovery. The local Client Portal adapter now addresses the analogous open-order blind spot by using official IBKR trade history to recover broker order identity and the official order-status endpoint to verify terminal truth. QuantConnect's repository is Apache-2.0; no source code was copied.
+2. **NautilusTrader `d2b1221...`** — transport-outcome classification pattern. The concrete local Alpaca/IBKR 408/429 mutation gap is closed. Continue applying the invariant to future broker mutation endpoints.
+3. **NautilusTrader `6cb6afc...`** — atomic WebSocket subscription state, request/connection epoch correlation, desired-subscription replay on reconnect. Evaluate only if local failure-injection exposes a concrete gap.
+4. **Alpaca Python SDK `8b466396...`** — reconnect jitter, half-open socket cleanup, optional connected-but-mute timeout, control-vs-market-frame separation. The local half-open/auth-failure cleanup regression has already been added; continue evaluating bounded jitter and cadence-aware silence handling only when justified by a local failure.
+5. **QuantConnect LEAN `78232af...`** — backup live-universe source pattern. We will not silently substitute backup data for safety-critical primary truth; any fallback must retain explicit provenance and fail-closed risk semantics.
+6. **QuantConnect LEAN `09e96f...`** — duplicate shared-bar correctness fix independently supports the existing revision/completed-cycle invariant; no local change needed.
 
-The hourly ecosystem watch remains silent when there is no material delta. Monitoring does not mean uncontrolled mutation: every integration still passes relevance, license/security, provenance, RED/GREEN, and exact-head CI gates.
+The ecosystem watch remains silent when there is no material delta. Monitoring does not mean uncontrolled mutation: every integration still passes relevance, license/security, provenance, RED/GREEN, and exact-head CI gates.
 
 ## Immediate engineering queue
 
 Priority order is now:
 
-1. Review Alpaca WebSocket connect/auth/reconnect lifecycle against the latest upstream reliability findings: prove half-open cleanup behavior, evaluate bounded jitter, and keep any connected-but-mute timeout opt-in and cadence-aware. Add local failure-injection tests before changing production behavior.
-2. Expand prospective OOS/walk-forward evidence with regime segmentation, realistic costs/slippage/latency, and provenance without retroactive holdout labeling.
-3. Add regime-level strategy attribution after the completed per-symbol attribution layer.
+1. Complete and preserve exact-head CI after the IBKR recovery + regime-attribution + provenance/status changes.
+2. Continue Alpaca WebSocket resilience review: bounded reconnect jitter and cadence-aware connected-but-mute detection only if local failure injection proves a gap.
+3. Expand prospective OOS/walk-forward evidence with realistic costs/slippage/latency and stronger regime segmentation without retroactive holdout labeling.
 4. Verify real NVDA/SPCX/KLAC market coverage end-to-end in monitor-only/paper-safe Alpaca configuration when runtime credentials are available outside Git.
 5. Evaluate FINRA/off-exchange evidence with source/reporting-latency/classification methodology before integration.
-6. Keep auditing any new broker mutation endpoint for definite-vs-ambiguous outcome semantics before it can clear pending state or retry.
+6. Keep auditing every new broker mutation/recovery endpoint for definite-vs-ambiguous outcome semantics and post-disconnect execution recovery before pending state can clear or retry.
 7. Keep PR #8 Draft until evidence and operational readiness justify a different state.
 
 ## Known blockers / intentionally unfinished
@@ -165,7 +176,7 @@ Priority order is now:
 - Real Alpaca end-to-end NVDA/SPCX/KLAC runtime evidence has not been produced from this execution environment.
 - Dark-pool/off-exchange evidence is not yet integrated.
 - Walk-forward/OOS evidence is not sufficient for live promotion.
-- Alpaca reconnect jitter/half-open cleanup has not yet been locally regression-tested against our implementation.
+- Alpaca reconnect jitter/connected-but-mute behavior has not yet been locally justified for production change.
 
 ## Future-agent rule
 
