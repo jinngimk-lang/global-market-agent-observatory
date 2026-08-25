@@ -13,6 +13,7 @@ from app.learning.models import (
     StrategyHealthPolicy,
     StrategyObservation,
     StrategyObservationStatus,
+    StrategyRegimeAttribution,
     StrategySymbolAttribution,
 )
 from app.learning.store import SQLiteStrategyLearningStore
@@ -78,7 +79,9 @@ class StrategyLearningService:
             entry_price = signal.entry_price or exit_price
             if entry_price <= 0:
                 continue
-            observation = self._observation_from_signal(signal, entry_price)
+            observation = self._observation_from_signal(signal, entry_price).model_copy(
+                update={"market_regime": self._market_regime(cycle, entry_price)}
+            )
             self._store.add_observation(observation)
             affected.add((observation.strategy_id, observation.version))
 
@@ -134,6 +137,41 @@ class StrategyLearningService:
             if attribution.degraded:
                 reasons.append(f"symbol_degraded:{symbol}")
 
+        regime_attribution: list[StrategyRegimeAttribution] = []
+        regimes = sorted(
+            {item.market_regime for item in observations if item.market_regime is not None}
+        )
+        for regime in regimes:
+            regime_observations = [
+                item for item in observations if item.market_regime == regime
+            ]
+            regime_recent = regime_observations[-self._policy.window_observations :]
+            regime_returns = [
+                item.net_return for item in regime_recent if item.net_return is not None
+            ]
+            (
+                regime_count,
+                regime_expectancy,
+                regime_win_rate,
+                regime_drawdown,
+            ) = self._metrics(regime_returns)
+            regime_reasons = self._degradation_reasons(
+                regime_count,
+                regime_expectancy,
+                regime_drawdown,
+            )
+            regime_attribution.append(
+                StrategyRegimeAttribution(
+                    regime=regime,
+                    closed_observations=regime_count,
+                    expectancy_after_costs=regime_expectancy,
+                    max_drawdown=regime_drawdown,
+                    win_rate=regime_win_rate,
+                    degraded=bool(regime_reasons),
+                    degradation_reasons=regime_reasons,
+                )
+            )
+
         reasons = list(dict.fromkeys(reasons))
         health = StrategyHealth(
             strategy_id=strategy_id.strip().lower(),
@@ -145,6 +183,7 @@ class StrategyLearningService:
             degraded=bool(reasons),
             degradation_reasons=reasons,
             symbol_attribution=symbol_attribution,
+            regime_attribution=regime_attribution,
             updated_at=self._now_from_observations(observations),
         )
         self._store.upsert_health(health)
@@ -228,6 +267,31 @@ class StrategyLearningService:
             evaluation_partition=partition,
             walk_forward_fold=fold,
         )
+
+    @staticmethod
+    def _market_regime(cycle: TradingCycleResult, reference_price: Decimal) -> str | None:
+        structure = cycle.structure
+        if structure is None:
+            return None
+        net_gex = structure.net_gex_1pct
+        vwap = structure.vwap
+        if net_gex is None:
+            gamma = "gamma-unknown"
+        elif net_gex > 0:
+            gamma = "positive-gamma"
+        elif net_gex < 0:
+            gamma = "negative-gamma"
+        else:
+            gamma = "neutral-gamma"
+        if vwap is None:
+            location = "vwap-unknown"
+        elif reference_price > vwap:
+            location = "above-vwap"
+        elif reference_price < vwap:
+            location = "below-vwap"
+        else:
+            location = "at-vwap"
+        return f"{gamma}|{location}"
 
     def _next_walk_forward_partition(
         self,
