@@ -130,6 +130,7 @@ def test_live_promotion_requires_broker_paper_and_execution_safety_evidence() ->
         replay_observations=500,
         paper_observations=100,
         broker_paper_observations=50,
+        verified_broker_paper_fill_observations=50,
         expectancy_after_costs=Decimal("0.002"),
         max_drawdown=Decimal("0.09"),
         idempotency_verified=True,
@@ -152,6 +153,37 @@ def test_live_promotion_requires_broker_paper_and_execution_safety_evidence() ->
     assert blocked.allowed is False
     assert "reconciliation_unverified" in blocked.blockers
     assert allowed.allowed is True
+
+
+def test_live_promotion_rejects_broker_paper_counts_without_verified_fills() -> None:
+    gate = StrategyPromotionGate(PromotionPolicy(min_broker_paper_observations=30))
+    evidence = PromotionEvidence(
+        deterministic_implementation=True,
+        data_provenance_complete=True,
+        replayable_data=True,
+        transaction_cost_model_documented=True,
+        out_of_sample_verified=True,
+        oos_holdout_observations=60,
+        walk_forward_folds=6,
+        replay_observations=500,
+        paper_observations=100,
+        broker_paper_observations=50,
+        expectancy_after_costs=Decimal("0.002"),
+        max_drawdown=Decimal("0.09"),
+        idempotency_verified=True,
+        failure_injection_verified=True,
+        reconciliation_verified=True,
+        degradation_rule_defined=True,
+    )
+
+    decision = gate.evaluate(
+        hypothesis(stage=StrategyStage.BROKER_PAPER),
+        evidence,
+        target=StrategyStage.LIVE,
+    )
+
+    assert decision.allowed is False
+    assert "insufficient_verified_broker_paper_fills" in decision.blockers
 
 
 def test_strategy_version_cannot_skip_promotion_stages() -> None:
