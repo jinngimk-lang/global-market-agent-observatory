@@ -102,6 +102,10 @@ def test_activation_is_blocked_while_strategy_health_is_degraded(tmp_path) -> No
         Settings(
             database_path=str(tmp_path / "operator.db"),
             operator_api_token=SecretStr("operator-token"),
+            # This contract test isolates the operator health gate. The
+            # continuous-improvement loop owns separate runtime tests and must
+            # not race this deliberately injected blocker.
+            strategy_learning_enabled=False,
         )
     )
 
