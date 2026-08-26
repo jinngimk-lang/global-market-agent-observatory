@@ -119,6 +119,8 @@ The required path is:
 
 The deterministic risk engine has final authority.
 
+Risk limits that exist to prevent creation or enlargement of exposure must not trap capital in an existing position. A reduction may bypass such new-risk bounds only when fresh account state proves that the order strictly decreases absolute position size without reversing through zero. HALTED state, stale/unknown market or account state, allowlists, order validity, and reversal protection remain fail-closed and are never bypassed by a claimed reduction.
+
 ### 4. Live trading is a first-class capability, but fails closed
 
 Live broker execution is part of the main system design, not a separate demo subsystem.
@@ -279,6 +281,7 @@ Responsibilities:
 
 - approve, resize, or reject order intents
 - enforce all hard limits
+- distinguish proven non-reversing reductions from exposure-creating/enlarging intents so new-risk bounds cannot prevent safe de-risking
 - fail closed under uncertain state
 - implement kill switch and lockouts
 
@@ -366,6 +369,7 @@ These are architectural invariants unless the project direction is deliberately 
 9. Kill switch is available independent of strategy logic.
 10. The system must be able to stop creating new exposure without requiring an LLM or external research service.
 11. Skills, MCP servers, connectors, and upstream integrations cannot override these invariants.
+12. A fresh, provably non-reversing exposure reduction must not be blocked solely by limits whose purpose is to prevent creation or enlargement of exposure; this never overrides HALTED or stale/unknown-state protections.
 
 ## Continuous Ecosystem Intelligence
 
@@ -437,6 +441,7 @@ Required validation layers:
 - failure-injection tests for stale feeds and broker outages
 - transport-outcome classification tests for definite versus ambiguous failures
 - reconciliation tests
+- risk-lockout tests proving strict reductions remain possible while reversals/new exposure remain blocked
 - paper/broker-paper soak tests
 - backtests with transaction costs and slippage
 - walk-forward / out-of-sample evaluation for strategies
