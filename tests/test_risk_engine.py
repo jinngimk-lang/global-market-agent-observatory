@@ -108,6 +108,102 @@ def test_sell_reducing_a_long_position_is_allowed() -> None:
     assert decision.code == "approved"
 
 
+def test_reducing_exit_is_not_blocked_by_loss_or_drawdown_lockouts() -> None:
+    engine = RiskEngine(
+        RiskLimits(
+            allowed_symbols={"BTCUSDT"},
+            daily_loss_limit=Decimal("500"),
+            max_portfolio_drawdown=Decimal("1000"),
+        )
+    )
+    portfolio = PortfolioSnapshot(
+        cash=Decimal("10000"),
+        realized_pnl_today=Decimal("-500"),
+        positions=[
+            Position(
+                symbol="BTCUSDT",
+                quantity=Decimal("1"),
+                average_price=Decimal("100"),
+                market_price=Decimal("100"),
+            )
+        ],
+    )
+
+    decision = engine.evaluate(
+        make_intent(side=Side.SELL, quantity="1"),
+        portfolio,
+        RiskContext(
+            trading_state=TradingState.REDUCING,
+            portfolio_drawdown=Decimal("1000"),
+        ),
+    )
+
+    assert decision.allowed is True
+    assert decision.code == "approved"
+
+
+def test_reducing_exit_can_exceed_new_risk_notional_and_gross_bounds() -> None:
+    engine = RiskEngine(
+        RiskLimits(
+            allowed_symbols={"BTCUSDT", "ETHUSDT"},
+            max_order_notional=Decimal("50"),
+            max_symbol_exposure=Decimal("50"),
+            max_gross_exposure=Decimal("50"),
+        )
+    )
+    portfolio = PortfolioSnapshot(
+        cash=Decimal("10000"),
+        positions=[
+            Position(
+                symbol="BTCUSDT",
+                quantity=Decimal("1"),
+                average_price=Decimal("100"),
+                market_price=Decimal("100"),
+            ),
+            Position(
+                symbol="ETHUSDT",
+                quantity=Decimal("1"),
+                average_price=Decimal("100"),
+                market_price=Decimal("100"),
+            ),
+        ],
+    )
+
+    decision = engine.evaluate(
+        make_intent(side=Side.SELL, quantity="1"),
+        portfolio,
+        RiskContext(trading_state=TradingState.REDUCING),
+    )
+
+    assert decision.allowed is True
+    assert decision.code == "approved"
+    assert decision.projected_gross_exposure == Decimal("100")
+
+
+def test_reducing_state_rejects_position_reversal() -> None:
+    engine = RiskEngine(RiskLimits(allowed_symbols={"BTCUSDT"}))
+    portfolio = PortfolioSnapshot(
+        cash=Decimal("10000"),
+        positions=[
+            Position(
+                symbol="BTCUSDT",
+                quantity=Decimal("1"),
+                average_price=Decimal("100"),
+                market_price=Decimal("100"),
+            )
+        ],
+    )
+
+    decision = engine.evaluate(
+        make_intent(side=Side.SELL, quantity="2"),
+        portfolio,
+        RiskContext(trading_state=TradingState.REDUCING),
+    )
+
+    assert decision.allowed is False
+    assert decision.code == "reducing_only"
+
+
 def test_rejects_after_daily_loss_limit_is_reached() -> None:
     engine = RiskEngine(
         RiskLimits(allowed_symbols={"BTCUSDT"}, daily_loss_limit=Decimal("500"))
