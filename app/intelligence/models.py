@@ -52,6 +52,7 @@ class ContextItem(BaseModel):
     summary: str
     event_time: datetime
     published_at: datetime
+    source_updated_at: datetime | None = None
     ingested_at: datetime
     freshness_sla_seconds: int
     evidence_kind: EvidenceKind
@@ -72,9 +73,11 @@ class ContextItem(BaseModel):
     def normalize_symbols(cls, value: list[str]) -> list[str]:
         return list(dict.fromkeys(item.strip().upper() for item in value if item.strip()))
 
-    @field_validator("event_time", "published_at", "ingested_at")
+    @field_validator("event_time", "published_at", "source_updated_at", "ingested_at")
     @classmethod
-    def normalize_timestamp(cls, value: datetime) -> datetime:
+    def normalize_timestamp(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
         if value.tzinfo is None:
             value = value.replace(tzinfo=UTC)
         return value.astimezone(UTC)
@@ -96,13 +99,15 @@ class ContextItem(BaseModel):
     @computed_field
     @property
     def provider_latency_seconds(self) -> Decimal:
-        seconds = (self.ingested_at - self.published_at).total_seconds()
+        provider_time = self.source_updated_at or self.published_at
+        seconds = (self.ingested_at - provider_time).total_seconds()
         return Decimal(str(max(seconds, 0.0)))
 
     @computed_field
     @property
     def clock_anomaly(self) -> bool:
-        return self.published_at > self.ingested_at
+        provider_time = self.source_updated_at or self.published_at
+        return provider_time > self.ingested_at
 
 
 class SymbolContextSnapshot(BaseModel):
