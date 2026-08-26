@@ -58,6 +58,7 @@ class ContextItem(BaseModel):
     evidence_kind: EvidenceKind
     confidence: Decimal = Decimal("1")
     tags: list[str] = Field(default_factory=list)
+    metadata: dict[str, str] = Field(default_factory=dict)
     source: ContextSource
 
     @field_validator("item_id", "category", "label", "summary")
