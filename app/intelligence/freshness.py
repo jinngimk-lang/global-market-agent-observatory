@@ -4,7 +4,6 @@ from datetime import UTC, datetime
 
 from app.intelligence.models import ContextItem, FreshnessClass
 
-
 _NEAR_REALTIME_NEWS_SECONDS = 15 * 60
 
 
