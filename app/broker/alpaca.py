@@ -192,7 +192,18 @@ class AlpacaExecutionAdapter:
                 code=f"alpaca_lookup_http_{response.status_code}",
                 message=self._response_message(response),
             )
-        return self._map_execution_result(response.json())
+        payload = response.json()
+        returned_client_order_id = str(payload.get("client_order_id") or "")
+        if returned_client_order_id != client_order_id:
+            return ExecutionResult(
+                client_order_id=client_order_id,
+                status=OrderStatus.UNKNOWN,
+                code="alpaca_lookup_identity_mismatch",
+                message=(
+                    "Alpaca lookup response client_order_id did not match the queried order."
+                ),
+            )
+        return self._map_execution_result(payload)
 
     async def submit(self, intent: OrderIntent) -> ExecutionResult:
         if intent.order_type is OrderType.LIMIT and intent.limit_price is None:
