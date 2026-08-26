@@ -1,6 +1,6 @@
 # Global Market Autonomous Trading Platform — Status
 
-Updated: 2026-08-25
+Updated: 2026-08-26
 Branch: `feature/autonomous-live-trading-platform`
 Draft PR: `#8`
 
@@ -44,6 +44,7 @@ Core rule: **processes recover where safe; capital permission fails closed.** Re
 - Alpaca submit/cancel and IBKR submit/confirmation/cancel classify HTTP 408/429 as ambiguous `UNKNOWN`, not definite rejection.
 - Unknown execution outcomes reconcile before retry; feed/cycle failures can HALT capital while process recovery continues.
 - IBKR reconciliation now checks open orders first, then recent execution history when an order has disappeared from the open-order view, then confirms authoritative terminal state via the order-status endpoint. Trade history is a recovery locator, never proof of a full fill.
+- Alpaca reconciliation lookup now binds successful REST evidence to the exact queried client-order id; contradictory or missing response identity returns `UNKNOWN` and cannot import an unrelated fill into local order truth.
 - Append-only audit records strategy, risk, execution, reconciliation, and kill-switch transitions.
 
 ### Operator controls
@@ -131,21 +132,32 @@ Local evidence:
 - CI `#522` on `3c1846a55e2069cf0ac7d5040a13f8ee22880184` completed successfully: Ruff, full pytest, compileall, engineering-skill verification on Python 3.12 and 3.13, plus Docker build all passed.
 - `PROJECT_DIRECTION.md` now makes the distinction durable policy: broker-paper mode/count alone cannot satisfy LIVE validation, and historical evidence cannot be retroactively relabeled as verified broker execution.
 
+### Reconciliation evidence binding
+
+- External trigger: NautilusTrader commit `ccc80cdb2d5ba6520152e4a3df544715d2143772` on 2026-08-26 tightened REST reconciliation authority by binding reports to requested account/instrument/order scope. NautilusTrader is LGPL-3.0; no source was copied.
+- Local audit found IBKR already scopes recovered trade history by exact `order_ref` and configured account, but Alpaca `by_client_order_id` accepted a successful response body without verifying the returned client-order identity.
+- RED commit `b0783d90e2b85cc9b83298a51d802c438fccca2b`, CI `#532`: Ruff passed and full pytest produced exactly `1 failed, 241 passed`; an unrelated response marked `FILLED` was incorrectly accepted as the queried order.
+- GREEN commit `ec6054e71aa43583fead96ff0d0ce1ccbb50cfa9` validates exact client-order identity before accepting Alpaca lookup state. Contradictory/missing identity returns `UNKNOWN` with no unrelated fill quantity or price.
+- GREEN CI `#534` completed successfully on Python 3.12 and 3.13 with Ruff, full pytest, compileall, engineering-skill verification, and Docker build.
+- Provenance: `docs/upstream/2026-08-26-reconciliation-evidence-binding.md`.
+
 The status-only commit that records this baseline must itself remain CI-clean before becoming the next exact-head baseline.
 
 ## Ecosystem intelligence state
 
 Canonical scan: `docs/upstream/2026-08-25-ecosystem-scan.md`.
 IBKR follow-up: `docs/upstream/2026-08-25-ibkr-disconnect-fill-recovery.md`.
+Reconciliation binding follow-up: `docs/upstream/2026-08-26-reconciliation-evidence-binding.md`.
 
 Current evidence queue:
 
 1. QuantConnect IBKR issue #249 — local analogous open-order blind spot addressed with official IBKR trade-history + terminal-status recovery; continue auditing reconnect/recovery semantics.
 2. NautilusTrader `d2b1221...` — ambiguous transport outcome classification; current 408/429 broker mutation gaps are closed, preserve invariant for future mutations.
 3. NautilusTrader `6cb6afc...` — connection epoch / desired-vs-acknowledged subscription recovery; adopt only if local failure injection proves a gap.
-4. Alpaca Python SDK `8b466396...` — reconnect jitter, half-open cleanup, optional silence timeout, control/data frame separation. Half-open/auth cleanup is covered locally. A naive fixed silence timeout is not safe for stock bars across closed-market periods; connected-but-mute detection still needs session/provider-aware semantics before production adoption.
-5. QuantConnect LEAN `78232af...` — backup live data pattern; no invisible fallback may satisfy safety-critical live freshness.
-6. QuantConnect LEAN `09e96f...` — duplicate shared-bar correctness independently supports the existing revision/completed-cycle invariant.
+4. NautilusTrader `ccc80cdb...` — reconciliation authority/evidence binding; analogous Alpaca lookup identity gap closed locally, and future broker recovery must bind evidence to the strongest available order/account/instrument identity before accepting terminal truth.
+5. Alpaca Python SDK `8b466396...` — reconnect jitter, half-open cleanup, optional silence timeout, control/data frame separation. Half-open/auth cleanup is covered locally. A naive fixed silence timeout is not safe for stock bars across closed-market periods; connected-but-mute detection still needs session/provider-aware semantics before production adoption.
+6. QuantConnect LEAN `78232af...` — backup live data pattern; no invisible fallback may satisfy safety-critical live freshness.
+7. QuantConnect LEAN `09e96f...` — duplicate shared-bar correctness independently supports the existing revision/completed-cycle invariant.
 
 No external repository is integrated merely because it is new or popular. Every external adaptation must retain provenance/license review and local RED/GREEN evidence.
 
@@ -156,7 +168,7 @@ No external repository is integrated merely because it is new or popular. Every 
 3. Collect real NVDA/SPCX/KLAC observed-fill and coverage evidence in monitor-only/paper-safe or broker-paper configuration when runtime credentials are available outside Git; verified broker-paper fills, not mode labels alone, are now required for LIVE evidence depth.
 4. Extend execution-friction evidence toward observed exit fills only when an auditable entry-to-exit execution identity exists; keep fixed-horizon exits explicitly modeled until then.
 5. Evaluate FINRA/off-exchange evidence with explicit source, reporting-latency, classification, and provenance methodology.
-6. Keep auditing broker mutation/recovery endpoints for definite-vs-ambiguous outcomes and post-disconnect execution recovery.
+6. Keep auditing broker mutation/recovery endpoints for definite-vs-ambiguous outcomes, evidence identity binding, and post-disconnect execution recovery.
 7. Keep PR #8 Draft until strategy evidence and operational readiness justify otherwise.
 
 ## Known blockers / intentionally unfinished
