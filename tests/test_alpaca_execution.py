@@ -102,6 +102,35 @@ async def test_alpaca_get_by_client_id_returns_none_for_404() -> None:
 
 
 @pytest.mark.asyncio
+async def test_alpaca_lookup_fails_closed_when_response_identity_does_not_match_query() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params["client_order_id"] == "nvda-strategy-1"
+        return httpx.Response(
+            200,
+            json={
+                "id": "unrelated-order",
+                "client_order_id": "other-strategy-order",
+                "status": "filled",
+                "filled_qty": "100",
+                "filled_avg_price": "1.00",
+            },
+        )
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://paper-api.alpaca.markets"
+    ) as client:
+        adapter = AlpacaExecutionAdapter(api_key="key", api_secret="secret", client=client)
+        result = await adapter.get_order_by_client_id("nvda-strategy-1")
+
+    assert result is not None
+    assert result.status is OrderStatus.UNKNOWN
+    assert result.client_order_id == "nvda-strategy-1"
+    assert result.code == "alpaca_lookup_identity_mismatch"
+    assert result.filled_quantity == Decimal("0")
+    assert result.filled_price is None
+
+
+@pytest.mark.asyncio
 async def test_alpaca_maps_filled_order_state() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
