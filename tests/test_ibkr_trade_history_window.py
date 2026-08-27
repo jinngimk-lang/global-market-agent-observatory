@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from app.broker.ibkr import IBKRExecutionAdapter
+from app.broker.ibkr_retention import IBKRRetentionAwareExecutionAdapter
 
 
 @pytest.mark.asyncio
@@ -21,7 +21,7 @@ async def test_ibkr_closed_order_lookup_uses_full_supported_trade_history_window
     async with httpx.AsyncClient(
         transport=httpx.MockTransport(handler), base_url="https://localhost:5000/v1/api"
     ) as client:
-        adapter = IBKRExecutionAdapter(account_id="U123", client=client)
+        adapter = IBKRRetentionAwareExecutionAdapter(account_id="U123", client=client)
         result = await adapter.get_order_by_client_id("nvda-ibkr-1")
 
     assert result is None
