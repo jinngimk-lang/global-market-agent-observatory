@@ -66,7 +66,7 @@ class ExecutionController:
             reconciled = await self._adapter.get_order_by_client_id(intent.client_order_id)
             if reconciled is not None:
                 result = reconciled
-            else:
+            if reconciled is None or reconciled.status is OrderStatus.UNKNOWN:
                 self._trading_state = TradingState.HALTED
 
         return ExecutionAttempt(result=result, risk_decision=decision)
