@@ -178,3 +178,69 @@ async def test_ibkr_observer_maps_gateway_account_data() -> None:
     assert snapshot.equity == 50000
     assert snapshot.positions[0].symbol == "MSFT"
     assert snapshot.orders[0].order_id == "99"
+
+
+@pytest.mark.asyncio
+async def test_ibkr_observer_reads_all_position_pages() -> None:
+    from app.broker.ibkr import IBKRObserver
+
+    requested_position_pages: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v1/api/iserver/accounts":
+            return httpx.Response(200, json={"accounts": ["U123"], "selectedAccount": "U123"})
+        if request.url.path == "/v1/api/portfolio/U123/summary":
+            return httpx.Response(
+                200,
+                json={
+                    "netliquidation": {"amount": 50000, "currency": "USD"},
+                    "totalcashvalue": {"amount": 20000, "currency": "USD"},
+                    "availablefunds": {"amount": 18000, "currency": "USD"},
+                },
+            )
+        if request.url.path.startswith("/v1/api/portfolio/U123/positions/"):
+            requested_position_pages.append(request.url.path)
+            page = request.url.path.rsplit("/", 1)[-1]
+            if page == "0":
+                return httpx.Response(
+                    200,
+                    json=[
+                        {
+                            "ticker": "MSFT",
+                            "position": 10,
+                            "avgPrice": 400,
+                            "mktPrice": 410,
+                            "pageSize": 1,
+                        }
+                    ],
+                )
+            if page == "1":
+                return httpx.Response(
+                    200,
+                    json=[
+                        {
+                            "ticker": "NVDA",
+                            "position": 5,
+                            "avgPrice": 150,
+                            "mktPrice": 155,
+                            "pageSize": 1,
+                        }
+                    ],
+                )
+            if page == "2":
+                return httpx.Response(200, json=[])
+        if request.url.path == "/v1/api/iserver/account/orders":
+            return httpx.Response(200, json={"orders": []})
+        raise AssertionError(f"Unexpected IBKR path: {request.url.path}")
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://localhost:5000/v1/api"
+    ) as client:
+        snapshot = await IBKRObserver(client=client, account_id="U123").snapshot()
+
+    assert [position.symbol for position in snapshot.positions] == ["MSFT", "NVDA"]
+    assert requested_position_pages == [
+        "/v1/api/portfolio/U123/positions/0",
+        "/v1/api/portfolio/U123/positions/1",
+        "/v1/api/portfolio/U123/positions/2",
+    ]
