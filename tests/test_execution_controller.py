@@ -156,3 +156,39 @@ async def test_duplicate_client_order_id_returns_existing_result_without_resubmi
 
     assert result == existing
     assert adapter.submit_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_unknown_submit_halts_when_reconciliation_remains_unknown() -> None:
+    class UnknownExecutionAdapter(FakeExecutionAdapter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.lookup_calls = 0
+
+        async def get_order_by_client_id(self, client_order_id: str) -> ExecutionResult | None:
+            self.lookup_calls += 1
+            if self.lookup_calls == 1:
+                return None
+            return ExecutionResult(
+                client_order_id=client_order_id,
+                status=OrderStatus.UNKNOWN,
+                code="lookup_unknown",
+                message="Broker truth is still unavailable.",
+            )
+
+        async def submit(self, intent: OrderIntent) -> ExecutionResult:
+            self.submit_calls += 1
+            return ExecutionResult(
+                client_order_id=intent.client_order_id,
+                status=OrderStatus.UNKNOWN,
+                code="submit_unknown",
+                message="Submission outcome is ambiguous.",
+            )
+
+    adapter = UnknownExecutionAdapter()
+    controller = make_controller(adapter)
+
+    result = await controller.submit(make_intent(), PortfolioSnapshot(cash=Decimal("10000")))
+
+    assert result.status is OrderStatus.UNKNOWN
+    assert controller.trading_state is TradingState.HALTED
