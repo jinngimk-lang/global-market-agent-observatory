@@ -1,6 +1,6 @@
 # Global Market Autonomous Trading Platform — Status
 
-Updated: 2026-08-27
+Updated: 2026-08-28
 Branch: `feature/autonomous-live-trading-platform`
 Draft PR: `#8`
 
@@ -45,6 +45,7 @@ Core rule: **processes recover where safe; capital permission fails closed.** Re
 - Alpaca submit/cancel and IBKR submit/confirmation/cancel classify HTTP 408/429 as ambiguous `UNKNOWN`, not definite rejection.
 - Unknown execution outcomes reconcile before retry; if reconciliation is absent or itself remains `UNKNOWN`, capital transitions to HALTED rather than allowing unresolved broker truth to coexist with ACTIVE state.
 - Feed/cycle failures can HALT capital while process recovery continues.
+- IBKR account observation exhausts the provider's paginated position endpoint until an empty terminal page before constructing portfolio/risk truth; HTTP failures, malformed pages, or partial coverage are not reinterpreted as a flat account.
 - IBKR reconciliation checks open orders first, then the full provider-supported seven-day execution-history window when an order has disappeared from the open-order view, then confirms authoritative terminal state via the order-status endpoint. Trade history is a recovery locator, never proof of a full fill, and finite provider history is not treated as globally complete.
 - Alpaca reconciliation lookup binds successful REST evidence to the exact queried client-order id; contradictory or missing response identity returns `UNKNOWN` and cannot import an unrelated fill into local order truth.
 - Append-only audit records strategy, risk, execution, reconciliation, and kill-switch transitions.
@@ -93,6 +94,17 @@ Core rule: **processes recover where safe; capital permission fails closed.** Re
 - Runtime never self-modifies strategy code/parameters or automatically skips promotion stages.
 
 ## Latest verification baseline
+
+### IBKR paginated position completeness
+
+- External trigger: NautilusTrader commit `1308d94dfc00ac46de5fd33ffa476d2bed46ef75` on 2026-08-27 fixed reconciliation paths where unavailable/partial bulk position coverage could be misread as affirmative flat-position evidence. NautilusTrader is LGPL-3.0; no source was copied.
+- Official IBKR Trading Web API documents `GET /portfolio/{accountId}/positions/{pageId}` as the paginated account-position endpoint.
+- Local audit found `IBKRObserver` requested only `positions/0` and promoted that first page into authoritative portfolio/risk state, silently omitting any later position pages.
+- RED commit `eb74cacd0b2263fc1938e2e17b274c12f9df56c4`, CI `#618`: Ruff passed and Python 3.12 full pytest failed on the new multi-page contract, proving the observer stopped after page 0.
+- Test-fixture follow-up `31f8be0cdca3a2b96320c0b1950661403e1f3a61` models an explicit empty terminal page for the pre-existing single-page case.
+- GREEN commit `2c8057e45bcb9f6dd258e90731be5961ac3c7761` walks page IDs until an empty terminal page and fails before producing account truth if a page is HTTP-failing, non-list, or contains invalid items.
+- GREEN CI `#622` completed successfully.
+- Provenance: `docs/upstream/2026-08-28-ibkr-position-pagination.md`.
 
 ### Unknown execution outcome remains fail-closed through reconciliation
 
@@ -179,30 +191,32 @@ Reconciliation binding follow-up: `docs/upstream/2026-08-26-reconciliation-evide
 Reducing-risk bounds follow-up: `docs/upstream/2026-08-26-reducing-risk-bounds.md`.
 IBKR retention follow-up: `docs/upstream/2026-08-27-ibkr-trade-history-retention.md`.
 Unknown-outcome halt follow-up: `docs/upstream/2026-08-27-unknown-outcome-reconciliation-halt.md`.
+IBKR position-pagination follow-up: `docs/upstream/2026-08-28-ibkr-position-pagination.md`.
 
 Current evidence queue:
 
-1. NautilusTrader `f2b2add...` — request correlation must survive timeouts until definitive evidence or shutdown. The analogous local `UNKNOWN -> UNKNOWN` capital-state gap is closed; preserve the invariant that unresolved broker truth cannot coexist with ACTIVE capital permission.
-2. NautilusTrader `5a2d980...` — finite broker history must never be represented as complete outside its provider-retained window. The local IBKR adapter now uses the official seven-day maximum instead of one day, while durable local identity/checkpoints remain necessary beyond provider retention.
-3. NautilusTrader `8aa30f9...` — strict reducing-exit versus new-risk bounds; analogous local gap is closed with RED/GREEN evidence. Preserve the rule that only proven non-reversing reductions can bypass exposure-creation bounds, while stale/unknown account state and HALTED continue to fail closed.
-4. QuantConnect IBKR issue #249 — local analogous open-order blind spot addressed with official IBKR trade-history + terminal-status recovery; continue auditing reconnect/recovery semantics.
-5. NautilusTrader `d2b1221...` — ambiguous transport outcome classification; current 408/429 broker mutation gaps are closed, preserve invariant for future mutations.
-6. NautilusTrader `6cb6afc...` — connection epoch / desired-vs-acknowledged subscription recovery; adopt only if local failure injection proves a gap.
-7. NautilusTrader `ccc80cdb...` — reconciliation authority/evidence binding; analogous Alpaca lookup identity gap closed locally, and future broker recovery must bind evidence to the strongest available order/account/instrument identity before accepting terminal truth.
-8. Alpaca Python SDK `8b466396...` — reconnect jitter, half-open cleanup, optional silence timeout, control/data frame separation. Half-open/auth cleanup is covered locally. A naive fixed silence timeout is not safe for stock bars across closed-market periods; connected-but-mute detection still needs session/provider-aware semantics before production adoption.
-9. QuantConnect LEAN `78232af...` — backup live data pattern; no invisible fallback may satisfy safety-critical live freshness.
-10. QuantConnect LEAN `09e96f...` — duplicate shared-bar correctness independently supports the existing revision/completed-cycle invariant.
+1. NautilusTrader `1308d94...` — unavailable or partial bulk position coverage must not be treated as affirmative flat-position evidence. The analogous local IBKR first-page-only gap is closed by exhausting the provider's paginated position endpoint before constructing portfolio/risk truth.
+2. NautilusTrader `f2b2add...` — request correlation must survive timeouts until definitive evidence or shutdown. The analogous local `UNKNOWN -> UNKNOWN` capital-state gap is closed; preserve the invariant that unresolved broker truth cannot coexist with ACTIVE capital permission.
+3. NautilusTrader `5a2d980...` — finite broker history must never be represented as complete outside its provider-retained window. The local IBKR adapter now uses the official seven-day maximum instead of one day, while durable local identity/checkpoints remain necessary beyond provider retention.
+4. NautilusTrader `8aa30f9...` — strict reducing-exit versus new-risk bounds; analogous local gap is closed with RED/GREEN evidence. Preserve the rule that only proven non-reversing reductions can bypass exposure-creation bounds, while stale/unknown account state and HALTED continue to fail closed.
+5. QuantConnect IBKR issue #249 — local analogous open-order blind spot addressed with official IBKR trade-history + terminal-status recovery; continue auditing reconnect/recovery semantics.
+6. NautilusTrader `d2b1221...` — ambiguous transport outcome classification; current 408/429 broker mutation gaps are closed, preserve invariant for future mutations.
+7. NautilusTrader `6cb6afc...` — connection epoch / desired-vs-acknowledged subscription recovery; adopt only if local failure injection proves a gap.
+8. NautilusTrader `ccc80cdb...` — reconciliation authority/evidence binding; analogous Alpaca lookup identity gap closed locally, and future broker recovery must bind evidence to the strongest available order/account/instrument identity before accepting terminal truth.
+9. Alpaca Python SDK `8b466396...` — reconnect jitter, half-open cleanup, optional silence timeout, control/data frame separation. Half-open/auth cleanup is covered locally. A naive fixed silence timeout is not safe for stock bars across closed-market periods; connected-but-mute detection still needs session/provider-aware semantics before production adoption.
+10. QuantConnect LEAN `78232af...` — backup live data pattern; no invisible fallback may satisfy safety-critical live freshness.
+11. QuantConnect LEAN `09e96f...` — duplicate shared-bar correctness independently supports the existing revision/completed-cycle invariant.
 
 No external repository is integrated merely because it is new or popular. Every external adaptation must retain provenance/license review and local RED/GREEN evidence.
 
 ## Immediate engineering queue
 
-1. Preserve exact-head CI on the current branch after the unknown-outcome fail-closed/status/provenance updates.
+1. Preserve exact-head CI after the IBKR position-pagination code, provenance, and status updates.
 2. Continue Alpaca WebSocket resilience review, but do not add a naive fixed stock-bar silence timeout that would misclassify market-closed periods; require session/provider-aware evidence first.
 3. Collect real NVDA/SPCX/KLAC observed-fill and coverage evidence in monitor-only/paper-safe or broker-paper configuration when runtime credentials are available outside Git; verified broker-paper fills, not mode labels alone, are required for LIVE evidence depth.
 4. Extend execution-friction evidence toward observed exit fills only when an auditable entry-to-exit execution identity exists; keep fixed-horizon exits explicitly modeled until then.
 5. Evaluate FINRA/off-exchange evidence with explicit source, reporting-latency, classification, and provenance methodology.
-6. Keep auditing broker mutation/recovery endpoints for definite-vs-ambiguous outcomes, evidence identity binding, finite-history completeness, post-disconnect execution recovery, and any safety gate that could unintentionally prevent a proven reduction.
+6. Keep auditing broker mutation/recovery endpoints for definite-vs-ambiguous outcomes, evidence identity binding, finite-history completeness, paginated/partial position coverage, post-disconnect execution recovery, and any safety gate that could unintentionally prevent a proven reduction.
 7. Keep PR #8 Draft until strategy evidence and operational readiness justify otherwise.
 
 ## Known blockers / intentionally unfinished
