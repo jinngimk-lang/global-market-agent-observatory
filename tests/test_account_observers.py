@@ -147,6 +147,8 @@ async def test_ibkr_observer_maps_gateway_account_data() -> None:
                     }
                 ],
             )
+        if request.url.path == "/v1/api/portfolio/U123/positions/1":
+            return httpx.Response(200, json=[])
         if request.url.path == "/v1/api/iserver/account/orders":
             return httpx.Response(
                 200,
