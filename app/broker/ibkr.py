@@ -56,16 +56,15 @@ class IBKRObserver:
         if not account_id:
             raise RuntimeError("IBKR gateway returned no account id")
 
-        summary_response, positions_response, orders_response = await asyncio.gather(
+        summary_response, orders_response = await asyncio.gather(
             client.get(f"/portfolio/{account_id}/summary"),
-            client.get(f"/portfolio/{account_id}/positions/0"),
             client.get("/iserver/account/orders"),
         )
-        for response in (summary_response, positions_response, orders_response):
+        for response in (summary_response, orders_response):
             response.raise_for_status()
 
+        positions_payload = await self._fetch_all_positions(client, str(account_id))
         summary: dict[str, Any] = summary_response.json()
-        positions_payload = positions_response.json() or []
         orders_payload = (orders_response.json() or {}).get("orders", [])
         currency = self._summary_currency(summary)
         return ExternalAccountSnapshot(
@@ -81,6 +80,26 @@ class IBKRObserver:
             positions=[self._map_position(item) for item in positions_payload],
             orders=[self._map_order(item) for item in orders_payload],
         )
+
+    @staticmethod
+    async def _fetch_all_positions(
+        client: httpx.AsyncClient,
+        account_id: str,
+    ) -> list[dict[str, Any]]:
+        positions: list[dict[str, Any]] = []
+        page_id = 0
+        while True:
+            response = await client.get(f"/portfolio/{account_id}/positions/{page_id}")
+            response.raise_for_status()
+            payload = response.json() or []
+            if not isinstance(payload, list):
+                raise RuntimeError("IBKR positions response was not a list")
+            if not payload:
+                return positions
+            if not all(isinstance(item, dict) for item in payload):
+                raise RuntimeError("IBKR positions response contained an invalid item")
+            positions.extend(payload)
+            page_id += 1
 
     @classmethod
     def _map_position(cls, item: dict[str, Any]) -> ObservedPosition:
