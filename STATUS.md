@@ -1,6 +1,6 @@
 # Global Market Autonomous Trading Platform — Status
 
-Updated: 2026-08-26
+Updated: 2026-08-27
 Branch: `feature/autonomous-live-trading-platform`
 Draft PR: `#8`
 
@@ -44,8 +44,8 @@ Core rule: **processes recover where safe; capital permission fails closed.** Re
 - Idempotent client-order identifiers and completed-cycle checkpoints prevent duplicate decisions/orders.
 - Alpaca submit/cancel and IBKR submit/confirmation/cancel classify HTTP 408/429 as ambiguous `UNKNOWN`, not definite rejection.
 - Unknown execution outcomes reconcile before retry; feed/cycle failures can HALT capital while process recovery continues.
-- IBKR reconciliation now checks open orders first, then recent execution history when an order has disappeared from the open-order view, then confirms authoritative terminal state via the order-status endpoint. Trade history is a recovery locator, never proof of a full fill.
-- Alpaca reconciliation lookup now binds successful REST evidence to the exact queried client-order id; contradictory or missing response identity returns `UNKNOWN` and cannot import an unrelated fill into local order truth.
+- IBKR reconciliation checks open orders first, then the full provider-supported seven-day execution-history window when an order has disappeared from the open-order view, then confirms authoritative terminal state via the order-status endpoint. Trade history is a recovery locator, never proof of a full fill, and finite provider history is not treated as globally complete.
+- Alpaca reconciliation lookup binds successful REST evidence to the exact queried client-order id; contradictory or missing response identity returns `UNKNOWN` and cannot import an unrelated fill into local order truth.
 - Append-only audit records strategy, risk, execution, reconciliation, and kill-switch transitions.
 
 ### Operator controls
@@ -80,18 +80,27 @@ Core rule: **processes recover where safe; capital permission fails closed.** Re
 - Regime-local degradation remains attribution evidence and does not silently become a global kill condition.
 - Held-out OOS regime attribution uses only holdout observations from completed walk-forward folds. Calibration observations, historical `UNASSIGNED` observations, and incomplete folds cannot contaminate OOS regime metrics.
 - Each OOS regime independently reports holdout sample count, completed folds, expectancy, drawdown, win rate, and `verified`; global OOS sufficiency does not imply per-regime sufficiency.
-- Strategy observations now distinguish signal/reference entry price from evaluated entry price and preserve execution-friction provenance.
+- Strategy observations distinguish signal/reference entry price from evaluated entry price and preserve execution-friction provenance.
 - A strategy observation upgrades its entry source to `observed-fill` only when a `FILLED` execution matches an allocation for the same strategy/version/symbol/action/generated-at identity and exact client-order ID. Unrelated fills cannot contaminate the observation.
 - When no verified fill exists, configured entry/exit slippage remains explicitly `modeled`; default modeled entry/exit slippage is zero rather than an invented market-wide constant.
 - Observed fills record actual entry slippage and signal-to-fill observation latency; an observed entry does not also pay modeled entry slippage a second time.
 - Exit evaluation is still fixed-horizon mark-to-market with explicitly modeled exit slippage; it is not represented as an observed broker exit.
 - Strategy health exposes execution-friction attribution: observed-vs-modeled entry counts, observed-fill rate, mean observed entry slippage, mean signal-to-fill latency, and the current modeled transaction-cost/entry/exit assumptions.
 - The Trading Console renders this attribution separately from symbol health. With no verified fills it displays `NO OBSERVED FILLS` and leaves actual slippage/latency unknown instead of manufacturing numbers.
-- Broker-paper total observations and verified broker-paper fills are now separate persisted promotion evidence fields. Verified fill depth is counted only from closed `BROKER_PAPER` observations whose entry source is an exact matched `observed-fill`.
+- Broker-paper total observations and verified broker-paper fills are separate persisted promotion evidence fields. Verified fill depth is counted only from closed `BROKER_PAPER` observations whose entry source is an exact matched `observed-fill`.
 - LIVE promotion requires both sufficient broker-paper observation depth and sufficient verified broker-paper fill depth. Legacy broker-paper counts default to zero verified fills and are never retroactively relabeled.
 - Runtime never self-modifies strategy code/parameters or automatically skips promotion stages.
 
 ## Latest verification baseline
+
+### IBKR trade-history retention completeness
+
+- External trigger: NautilusTrader commit `5a2d9801eac2133689c555441f6b4bd6e8e634ba` on 2026-08-27 fixed Binance Futures reconciliation that treated history outside the venue-retained execution window as complete. NautilusTrader is LGPL-3.0; no source was copied.
+- Official IBKR Trading Web API documentation states `GET /iserver/account/trades` can return up to seven prior days through `days=7`.
+- Local RED commit `9b33efee2a5c9b570cfb990ff67f82ac7facffcd`, CI `#594`: Ruff passed and full pytest failed exactly at the requested-window contract; Python 3.12 reported `1 failed, 266 passed`, observing `days=1` instead of `days=7`.
+- GREEN implementation commits `c512b6c08f8b8c7219e6c3c4444404040a4f7f27`, `33c91ae108f812fb2d69e246ebdfff194bc361d1`, and `1aa32b1c3e2cd7594dbf774694fef85713c8ffc0` route production IBKR construction through a retention-aware adapter that requests the full supported window while preserving order-status authority for terminal truth.
+- Code/provenance exact-head CI `#602` on `951ddd74590420936ba47306074d6771e33b24db` completed successfully: Python 3.12/3.13, Ruff, full pytest, compileall, engineering-skill verification, and Docker build all passed.
+- Provenance: `docs/upstream/2026-08-27-ibkr-trade-history-retention.md`.
 
 ### Risk-reducing exits versus new-risk bounds
 
@@ -139,7 +148,7 @@ Local evidence:
 - LIVE gate commit `39b64d274d8d034bc732e978941e78c29183da7b` requires verified broker-paper fill depth to meet the configured broker-paper minimum in addition to total broker-paper observations.
 - Learning sync commit `3c1846a55e2069cf0ac7d5040a13f8ee22880184` counts verified depth only from closed `BROKER_PAPER` observations with exact matched `observed-fill` entry provenance.
 - CI `#522` on `3c1846a55e2069cf0ac7d5040a13f8ee22880184` completed successfully: Ruff, full pytest, compileall, engineering-skill verification on Python 3.12 and 3.13, plus Docker build all passed.
-- `PROJECT_DIRECTION.md` now makes the distinction durable policy: broker-paper mode/count alone cannot satisfy LIVE validation, and historical evidence cannot be retroactively relabeled as verified broker execution.
+- `PROJECT_DIRECTION.md` makes the distinction durable policy: broker-paper mode/count alone cannot satisfy LIVE validation, and historical evidence cannot be retroactively relabeled as verified broker execution.
 
 ### Reconciliation evidence binding
 
@@ -155,31 +164,33 @@ The status-only commit that records this baseline must itself remain CI-clean be
 ## Ecosystem intelligence state
 
 Canonical scan: `docs/upstream/2026-08-25-ecosystem-scan.md`.
-IBKR follow-up: `docs/upstream/2026-08-25-ibkr-disconnect-fill-recovery.md`.
+IBKR disconnect-fill follow-up: `docs/upstream/2026-08-25-ibkr-disconnect-fill-recovery.md`.
 Reconciliation binding follow-up: `docs/upstream/2026-08-26-reconciliation-evidence-binding.md`.
 Reducing-risk bounds follow-up: `docs/upstream/2026-08-26-reducing-risk-bounds.md`.
+IBKR retention follow-up: `docs/upstream/2026-08-27-ibkr-trade-history-retention.md`.
 
 Current evidence queue:
 
-1. NautilusTrader `8aa30f9...` — strict reducing-exit versus new-risk bounds; analogous local gap is closed with RED/GREEN evidence. Preserve the rule that only proven non-reversing reductions can bypass exposure-creation bounds, while stale/unknown account state and HALTED continue to fail closed.
-2. QuantConnect IBKR issue #249 — local analogous open-order blind spot addressed with official IBKR trade-history + terminal-status recovery; continue auditing reconnect/recovery semantics.
-3. NautilusTrader `d2b1221...` — ambiguous transport outcome classification; current 408/429 broker mutation gaps are closed, preserve invariant for future mutations.
-4. NautilusTrader `6cb6afc...` — connection epoch / desired-vs-acknowledged subscription recovery; adopt only if local failure injection proves a gap.
-5. NautilusTrader `ccc80cdb...` — reconciliation authority/evidence binding; analogous Alpaca lookup identity gap closed locally, and future broker recovery must bind evidence to the strongest available order/account/instrument identity before accepting terminal truth.
-6. Alpaca Python SDK `8b466396...` — reconnect jitter, half-open cleanup, optional silence timeout, control/data frame separation. Half-open/auth cleanup is covered locally. A naive fixed silence timeout is not safe for stock bars across closed-market periods; connected-but-mute detection still needs session/provider-aware semantics before production adoption.
-7. QuantConnect LEAN `78232af...` — backup live data pattern; no invisible fallback may satisfy safety-critical live freshness.
-8. QuantConnect LEAN `09e96f...` — duplicate shared-bar correctness independently supports the existing revision/completed-cycle invariant.
+1. NautilusTrader `5a2d980...` — finite broker history must never be represented as complete outside its provider-retained window. The local IBKR adapter now uses the official seven-day maximum instead of one day, while durable local identity/checkpoints remain necessary beyond provider retention.
+2. NautilusTrader `8aa30f9...` — strict reducing-exit versus new-risk bounds; analogous local gap is closed with RED/GREEN evidence. Preserve the rule that only proven non-reversing reductions can bypass exposure-creation bounds, while stale/unknown account state and HALTED continue to fail closed.
+3. QuantConnect IBKR issue #249 — local analogous open-order blind spot addressed with official IBKR trade-history + terminal-status recovery; continue auditing reconnect/recovery semantics.
+4. NautilusTrader `d2b1221...` — ambiguous transport outcome classification; current 408/429 broker mutation gaps are closed, preserve invariant for future mutations.
+5. NautilusTrader `6cb6afc...` — connection epoch / desired-vs-acknowledged subscription recovery; adopt only if local failure injection proves a gap.
+6. NautilusTrader `ccc80cdb...` — reconciliation authority/evidence binding; analogous Alpaca lookup identity gap closed locally, and future broker recovery must bind evidence to the strongest available order/account/instrument identity before accepting terminal truth.
+7. Alpaca Python SDK `8b466396...` — reconnect jitter, half-open cleanup, optional silence timeout, control/data frame separation. Half-open/auth cleanup is covered locally. A naive fixed silence timeout is not safe for stock bars across closed-market periods; connected-but-mute detection still needs session/provider-aware semantics before production adoption.
+8. QuantConnect LEAN `78232af...` — backup live data pattern; no invisible fallback may satisfy safety-critical live freshness.
+9. QuantConnect LEAN `09e96f...` — duplicate shared-bar correctness independently supports the existing revision/completed-cycle invariant.
 
 No external repository is integrated merely because it is new or popular. Every external adaptation must retain provenance/license review and local RED/GREEN evidence.
 
 ## Immediate engineering queue
 
-1. Preserve exact-head CI on the current branch after the risk-policy/status/provenance updates.
+1. Preserve exact-head CI on the current branch after the IBKR retention/status/provenance updates.
 2. Continue Alpaca WebSocket resilience review, but do not add a naive fixed stock-bar silence timeout that would misclassify market-closed periods; require session/provider-aware evidence first.
-3. Collect real NVDA/SPCX/KLAC observed-fill and coverage evidence in monitor-only/paper-safe or broker-paper configuration when runtime credentials are available outside Git; verified broker-paper fills, not mode labels alone, are now required for LIVE evidence depth.
+3. Collect real NVDA/SPCX/KLAC observed-fill and coverage evidence in monitor-only/paper-safe or broker-paper configuration when runtime credentials are available outside Git; verified broker-paper fills, not mode labels alone, are required for LIVE evidence depth.
 4. Extend execution-friction evidence toward observed exit fills only when an auditable entry-to-exit execution identity exists; keep fixed-horizon exits explicitly modeled until then.
 5. Evaluate FINRA/off-exchange evidence with explicit source, reporting-latency, classification, and provenance methodology.
-6. Keep auditing broker mutation/recovery endpoints for definite-vs-ambiguous outcomes, evidence identity binding, post-disconnect execution recovery, and any safety gate that could unintentionally prevent a proven reduction.
+6. Keep auditing broker mutation/recovery endpoints for definite-vs-ambiguous outcomes, evidence identity binding, finite-history completeness, post-disconnect execution recovery, and any safety gate that could unintentionally prevent a proven reduction.
 7. Keep PR #8 Draft until strategy evidence and operational readiness justify otherwise.
 
 ## Known blockers / intentionally unfinished
@@ -187,7 +198,7 @@ No external repository is integrated merely because it is new or popular. Every 
 - No current strategy is approved for autonomous live capital.
 - Real broker credentials are never stored in Git.
 - Real Alpaca end-to-end NVDA/SPCX/KLAC runtime evidence has not been produced from this execution environment.
-- Verified broker-paper fill depth is currently insufficient for LIVE promotion; legacy broker-paper counts do not satisfy the new gate.
+- Verified broker-paper fill depth is currently insufficient for LIVE promotion; legacy broker-paper counts do not satisfy the gate.
 - Fixed-horizon exit evaluation remains modeled; no observed broker exit is claimed without an auditable entry-to-exit execution identity.
 - Dark-pool/off-exchange evidence is not yet integrated.
 - Walk-forward/OOS evidence is still insufficient for live promotion.
