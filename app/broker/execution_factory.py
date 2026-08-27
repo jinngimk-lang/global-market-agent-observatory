@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.broker.alpaca import AlpacaExecutionAdapter
 from app.broker.base import ExecutionAdapter
-from app.broker.ibkr import IBKRExecutionAdapter
+from app.broker.ibkr_retention import IBKRRetentionAwareExecutionAdapter
 from app.broker.paper_execution import PaperExecutionAdapter
 from app.domain.models import ExecutionProvider, TradingMode
 from app.settings import Settings
@@ -63,7 +63,7 @@ def build_execution_adapter(settings: Settings, store: SQLiteStore) -> Execution
         else:
             raise ValueError("IBKR execution requires broker-paper or live trading mode.")
 
-        return IBKRExecutionAdapter(
+        return IBKRRetentionAwareExecutionAdapter(
             account_id=settings.ibkr_account_id,
             base_url=settings.ibkr_base_url,
             verify_ssl=settings.ibkr_verify_ssl,
