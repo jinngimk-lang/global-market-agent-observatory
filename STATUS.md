@@ -1,6 +1,6 @@
 # Global Market Autonomous Trading Platform — Status
 
-Updated: 2026-08-28
+Updated: 2026-08-29
 Branch: `feature/autonomous-live-trading-platform`
 Draft PR: `#8`
 
@@ -94,6 +94,16 @@ Core rule: **processes recover where safe; capital permission fails closed.** Re
 - Runtime never self-modifies strategy code/parameters or automatically skips promotion stages.
 
 ## Latest verification baseline
+
+### Wheel-only third-party install policy
+
+- External trigger: NautilusTrader commit `338c28efd15085f28a97391972fe1a0f09718100` on 2026-08-29 extended its security checks with a no-build-package policy so newly resolved third-party dependencies cannot silently fall back to source builds. NautilusTrader is LGPL-3.0; no source was copied.
+- Local audit found GitHub Actions test/audit environments and the production Docker build used ordinary `pip install`, allowing index-resolved third-party source distributions to execute build backends when no wheel was selected.
+- RED contract commit `d3be319c9cadd49553f42fb088a88175896bf7d4`, CI `#636`: Ruff passed and Python 3.12 full pytest failed on the new wheel-only install policy contract.
+- Initial GREEN wiring exposed a YAML parsing regression because an unquoted `:all:` appeared in a workflow plain scalar; CI `#639` failed before jobs were created. Commit `14c394c52c18d102db5407f718ea55e30f7565eb` fixes the workflow by shell-quoting the pip format-control value, and `1939f2d0f1a7e0f8631117a19f95d0c634c1751c` aligns the contract test.
+- CI and dependency-audit installs now require `--only-binary=':all:'`; the Docker build requires `--only-binary=:all:`. The checked-out local project may still be built, but third-party index dependencies cannot silently fall back to sdists. No runtime dependency was added.
+- Behavior head `1939f2d0f1a7e0f8631117a19f95d0c634c1751c`, CI `#643`, completed successfully.
+- Provenance: `docs/upstream/2026-08-29-wheel-only-third-party-installs.md`.
 
 ### IBKR paginated position completeness
 
@@ -192,6 +202,7 @@ Reducing-risk bounds follow-up: `docs/upstream/2026-08-26-reducing-risk-bounds.m
 IBKR retention follow-up: `docs/upstream/2026-08-27-ibkr-trade-history-retention.md`.
 Unknown-outcome halt follow-up: `docs/upstream/2026-08-27-unknown-outcome-reconciliation-halt.md`.
 IBKR position-pagination follow-up: `docs/upstream/2026-08-28-ibkr-position-pagination.md`.
+Wheel-only third-party install follow-up: `docs/upstream/2026-08-29-wheel-only-third-party-installs.md`.
 
 Current evidence queue:
 
@@ -206,12 +217,13 @@ Current evidence queue:
 9. Alpaca Python SDK `8b466396...` — reconnect jitter, half-open cleanup, optional silence timeout, control/data frame separation. Half-open/auth cleanup is covered locally. A naive fixed silence timeout is not safe for stock bars across closed-market periods; connected-but-mute detection still needs session/provider-aware semantics before production adoption.
 10. QuantConnect LEAN `78232af...` — backup live data pattern; no invisible fallback may satisfy safety-critical live freshness.
 11. QuantConnect LEAN `09e96f...` — duplicate shared-bar correctness independently supports the existing revision/completed-cycle invariant.
+12. NautilusTrader `338c28e...` — third-party package resolution must not silently gain build-backend execution merely because a compatible wheel is unavailable. The local CI/audit/Docker paths now fail closed on source-distribution fallback while still building the checked-out local project.
 
 No external repository is integrated merely because it is new or popular. Every external adaptation must retain provenance/license review and local RED/GREEN evidence.
 
 ## Immediate engineering queue
 
-1. Preserve exact-head CI after the IBKR position-pagination code, provenance, and status updates.
+1. Preserve exact-head CI after the wheel-only third-party install policy, provenance, and status update.
 2. Continue Alpaca WebSocket resilience review, but do not add a naive fixed stock-bar silence timeout that would misclassify market-closed periods; require session/provider-aware evidence first.
 3. Collect real NVDA/SPCX/KLAC observed-fill and coverage evidence in monitor-only/paper-safe or broker-paper configuration when runtime credentials are available outside Git; verified broker-paper fills, not mode labels alone, are required for LIVE evidence depth.
 4. Extend execution-friction evidence toward observed exit fills only when an auditable entry-to-exit execution identity exists; keep fixed-horizon exits explicitly modeled until then.
