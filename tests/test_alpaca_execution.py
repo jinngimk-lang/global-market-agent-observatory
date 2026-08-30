@@ -22,9 +22,23 @@ def make_intent(*, order_type: OrderType = OrderType.MARKET) -> OrderIntent:
     )
 
 
+def open_clock() -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "timestamp": "2026-08-31T14:00:00Z",
+            "is_open": True,
+            "next_open": "2026-09-01T13:30:00Z",
+            "next_close": "2026-08-31T20:00:00Z",
+        },
+    )
+
+
 @pytest.mark.asyncio
 async def test_alpaca_submit_maps_broker_neutral_market_order() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v2/clock":
+            return open_clock()
         assert request.url.path == "/v2/orders"
         assert request.method == "POST"
         assert request.headers["APCA-API-KEY-ID"] == "key"
@@ -62,6 +76,8 @@ async def test_alpaca_submit_maps_broker_neutral_market_order() -> None:
 @pytest.mark.asyncio
 async def test_alpaca_submit_limit_order_includes_limit_price() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v2/clock":
+            return open_clock()
         body = json.loads(request.content)
         assert body["type"] == "limit"
         assert body["limit_price"] == "199.50"
@@ -176,6 +192,8 @@ async def test_alpaca_cancel_maps_204_to_cancelled() -> None:
 @pytest.mark.asyncio
 async def test_alpaca_submit_transport_failure_is_unknown_not_safe_to_retry() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v2/clock":
+            return open_clock()
         raise httpx.ConnectError("connection dropped", request=request)
 
     async with httpx.AsyncClient(
@@ -191,6 +209,8 @@ async def test_alpaca_submit_transport_failure_is_unknown_not_safe_to_retry() ->
 @pytest.mark.asyncio
 async def test_alpaca_submit_server_error_is_unknown() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v2/clock":
+            return open_clock()
         return httpx.Response(503, json={"message": "temporarily unavailable"})
 
     async with httpx.AsyncClient(
@@ -240,4 +260,25 @@ async def test_alpaca_submit_refuses_to_queue_day_order_when_market_is_closed() 
 
     assert result.status is OrderStatus.REJECTED
     assert result.code == "alpaca_market_closed"
+    assert requests == [("GET", "/v2/clock")]
+
+
+@pytest.mark.asyncio
+async def test_alpaca_submit_fails_closed_when_market_clock_is_unavailable() -> None:
+    requests: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((request.method, request.url.path))
+        if request.url.path == "/v2/clock":
+            return httpx.Response(503, json={"message": "clock unavailable"})
+        raise AssertionError("order mutation must not be attempted without session authority")
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://paper-api.alpaca.markets"
+    ) as client:
+        adapter = AlpacaExecutionAdapter(api_key="key", api_secret="secret", client=client)
+        result = await adapter.submit(make_intent())
+
+    assert result.status is OrderStatus.REJECTED
+    assert result.code == "alpaca_market_clock_unavailable"
     assert requests == [("GET", "/v2/clock")]
