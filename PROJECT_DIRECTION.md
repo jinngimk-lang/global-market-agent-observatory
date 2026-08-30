@@ -135,6 +135,7 @@ However:
 - failed reconciliation must block new live risk
 - kill switch must block all new orders immediately
 - repeated execution or data errors must trigger automatic lockout
+- a market-data event outside an order's currently eligible execution session must not silently queue autonomous exposure into a later session; session eligibility must be established at the broker execution boundary before mutation, and explicit extended-hours capability requires separate reviewed order/TIF/liquidity/risk semantics
 
 ### 5. Portfolio decisions beat isolated-symbol decisions
 
@@ -306,6 +307,7 @@ Execution must handle:
 - retry rules that cannot duplicate an order
 - reconciliation
 - explicit classification of definite failure versus ambiguous/unknown transport outcome before pending state is rolled back or retried
+- provider-appropriate session eligibility before creating a new order, so an ineligible DAY/session-bound order cannot silently become a queued future-session mutation
 
 ### Orchestrator / Trading Loop
 
@@ -370,6 +372,7 @@ These are architectural invariants unless the project direction is deliberately 
 10. The system must be able to stop creating new exposure without requiring an LLM or external research service.
 11. Skills, MCP servers, connectors, and upstream integrations cannot override these invariants.
 12. A fresh, provably non-reversing exposure reduction must not be blocked solely by limits whose purpose is to prevent creation or enlargement of exposure; this never overrides HALTED or stale/unknown-state protections.
+13. Session-bound orders must not be submitted when their provider-authoritative execution session is closed or cannot be established. A broker's ability to queue an order is not authority to carry a stale autonomous intent into the next session; extended-hours trading is a distinct capability that requires explicit enablement and dedicated validation.
 
 ## Continuous Ecosystem Intelligence
 
@@ -440,6 +443,7 @@ Required validation layers:
 - idempotency tests for order submission
 - failure-injection tests for stale feeds and broker outages
 - transport-outcome classification tests for definite versus ambiguous failures
+- session-eligibility tests proving closed/unavailable provider session state blocks new session-bound mutations before order submission
 - reconciliation tests
 - risk-lockout tests proving strict reductions remain possible while reversals/new exposure remain blocked
 - paper/broker-paper soak tests
@@ -517,36 +521,3 @@ This phase is permanent and overlaps all earlier phases:
 - preserve license/provenance;
 - keep `PROJECT_DIRECTION.md` and `STATUS.md` synchronized with durable improvements;
 - reject integrations that add more uncertainty than they remove.
-
-## Definition of Success
-
-The project is successful when it can:
-
-1. run continuously without an LLM being required for safety-critical operation
-2. observe live markets and account state reliably
-3. compute transparent market-structure features
-4. emit reproducible strategy signals
-5. apply deterministic portfolio/risk limits
-6. execute paper and live orders through the same controlled workflow
-7. reconcile broker state after every uncertain execution outcome
-8. provide a complete audit trail
-9. measure strategy performance out of sample
-10. automatically stop or reduce risk when data, execution, or strategy health deteriorates
-11. continuously absorb relevant ecosystem improvements without weakening safety, provenance, or reproducibility
-12. preserve enough repository documentation that a future agent can recover the current direction without requiring the user to restate it
-
-## Context-Recovery Protocol for Agents
-
-When an agent loses conversational context, starts a new session, resumes after a long interruption, or is unsure whether a proposed change fits the project:
-
-1. Read `PROJECT_DIRECTION.md` in full.
-2. Read `STATUS.md`.
-3. Read `AGENTS.md`.
-4. Read `docs/AUTONOMOUS_OWNER_GOVERNANCE.md`.
-5. Read `docs/INNOVATION_DOCTRINE.md` when relevant.
-6. Read `CONTEXT.md` and any relevant ADRs/specs/plans for the current change.
-7. Inspect current branch status, PR/CI evidence, and the newest materially relevant upstream/provider developments before modifying code.
-8. Reconcile the requested change against the Purpose, Core Principles, Live-Trading Safety Invariants, and Delivery Order above.
-9. If evidence supports a materially better direction, update this document and `STATUS.md` rather than silently drifting.
-
-This protocol is part of the project architecture, not optional documentation hygiene.
