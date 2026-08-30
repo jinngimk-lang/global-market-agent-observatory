@@ -24,6 +24,8 @@ def intent(client_order_id: str) -> OrderIntent:
 @pytest.mark.parametrize("status_code", [408, 429])
 async def test_alpaca_submit_ambiguous_http_status_is_unknown(status_code: int) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v2/clock":
+            return httpx.Response(200, json={"is_open": True})
         assert request.url.path == "/v2/orders"
         return httpx.Response(status_code, json={"message": "request outcome uncertain"})
 
