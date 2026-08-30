@@ -226,9 +226,45 @@ class AlpacaExecutionAdapter:
             payload["limit_price"] = str(intent.limit_price)
 
         if self._client is not None:
-            return await self._submit(self._client, intent, payload)
+            return await self._submit_when_market_open(self._client, intent, payload)
         async with httpx.AsyncClient(base_url=self._base_url, timeout=20) as client:
-            return await self._submit(client, intent, payload)
+            return await self._submit_when_market_open(client, intent, payload)
+
+    async def _submit_when_market_open(
+        self,
+        client: httpx.AsyncClient,
+        intent: OrderIntent,
+        payload: dict[str, str],
+    ) -> ExecutionResult:
+        clock_error = ExecutionResult(
+            client_order_id=intent.client_order_id,
+            status=OrderStatus.REJECTED,
+            code="alpaca_market_clock_unavailable",
+            message="Alpaca market clock could not prove the regular equity session is open.",
+        )
+        try:
+            response = await client.get("/v2/clock", headers=self._headers)
+        except httpx.TransportError:
+            return clock_error
+        if response.is_error:
+            return clock_error
+        try:
+            clock = response.json()
+        except ValueError:
+            return clock_error
+        if not isinstance(clock, dict) or not isinstance(clock.get("is_open"), bool):
+            return clock_error
+        if not clock["is_open"]:
+            return ExecutionResult(
+                client_order_id=intent.client_order_id,
+                status=OrderStatus.REJECTED,
+                code="alpaca_market_closed",
+                message=(
+                    "Alpaca reports the regular equity session is closed; "
+                    "the DAY order was not submitted."
+                ),
+            )
+        return await self._submit(client, intent, payload)
 
     async def _submit(
         self,
