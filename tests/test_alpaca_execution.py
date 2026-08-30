@@ -201,3 +201,43 @@ async def test_alpaca_submit_server_error_is_unknown() -> None:
 
     assert result.status is OrderStatus.UNKNOWN
     assert result.code == "alpaca_server_unknown"
+
+
+@pytest.mark.asyncio
+async def test_alpaca_submit_refuses_to_queue_day_order_when_market_is_closed() -> None:
+    requests: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append((request.method, request.url.path))
+        if request.url.path == "/v2/clock":
+            return httpx.Response(
+                200,
+                json={
+                    "timestamp": "2026-08-30T12:00:00Z",
+                    "is_open": False,
+                    "next_open": "2026-08-31T13:30:00Z",
+                    "next_close": "2026-08-31T20:00:00Z",
+                },
+            )
+        if request.url.path == "/v2/orders":
+            return httpx.Response(
+                200,
+                json={
+                    "id": "queued-order",
+                    "client_order_id": "nvda-strategy-1",
+                    "status": "accepted",
+                    "filled_qty": "0",
+                    "filled_avg_price": None,
+                },
+            )
+        raise AssertionError(f"unexpected request: {request.method} {request.url.path}")
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="https://paper-api.alpaca.markets"
+    ) as client:
+        adapter = AlpacaExecutionAdapter(api_key="key", api_secret="secret", client=client)
+        result = await adapter.submit(make_intent())
+
+    assert result.status is OrderStatus.REJECTED
+    assert result.code == "alpaca_market_closed"
+    assert requests == [("GET", "/v2/clock")]
