@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -39,9 +38,6 @@ from app.trading.portfolio_source import (
     PortfolioSource,
 )
 from app.trading.state_store import SQLiteTradingStateStore
-
-
-logger = logging.getLogger(__name__)
 
 
 class ApplicationState:
@@ -315,11 +311,6 @@ class ApplicationState:
             for name, task in named_tasks.items():
                 if task in pending:
                     self.shutdown_errors[name] = "shutdown_timeout"
-                    logger.error(
-                        "runtime task %s did not stop within %.3fs",
-                        name,
-                        self._shutdown_task_timeout_seconds,
-                    )
                     task.cancel()
                     continue
                 if task in done:
@@ -328,9 +319,7 @@ class ApplicationState:
                     except asyncio.CancelledError:
                         pass
                     except Exception as exc:
-                        message = f"{type(exc).__name__}: {exc}"
-                        self.shutdown_errors[name] = message
-                        logger.error("runtime task %s failed during shutdown: %s", name, message)
+                        self.shutdown_errors[name] = f"{type(exc).__name__}: {exc}"
         self._feed_task = None
         self._account_task = None
         self._improvement_task = None
