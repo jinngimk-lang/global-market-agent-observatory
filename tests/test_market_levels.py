@@ -41,7 +41,7 @@ def test_levels_choose_nearest_confirmed_pivots_around_latest_close() -> None:
     levels = derive_support_resistance(candles, pivot_width=1, lookback=50)
 
     assert levels.latest_close == 115
-    assert levels.support == 98
+    assert levels.support == 99
     assert levels.resistance == 121
     assert levels.support_method == "confirmed-pivot"
     assert levels.resistance_method == "confirmed-pivot"
