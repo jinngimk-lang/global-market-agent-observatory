@@ -17,6 +17,10 @@
     const loadTradingStatus = () => get('/api/trading/status', 'trading status');
     const loadMarketStructure = () => get('/api/market/structure', 'market structure');
     const loadMarketCoverage = () => get('/api/market/coverage', 'market coverage');
+    const loadMarketHistory = (symbol, timeframe, limit = 240) => get(
+      `/api/market/history/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${encodeURIComponent(limit)}`,
+      'market history',
+    );
     const loadPortfolio = () => get('/api/portfolio', 'portfolio');
     const loadOrders = (limit = 50) => get(
       `/api/orders?limit=${encodeURIComponent(limit)}`,
@@ -31,6 +35,7 @@
       loadTradingStatus,
       loadMarketStructure,
       loadMarketCoverage,
+      loadMarketHistory,
       loadPortfolio,
       loadOrders,
       loadAudit,
