@@ -1,6 +1,6 @@
 # Global Market Autonomous Trading Platform — Status
 
-Updated: 2026-08-30
+Updated: 2026-08-31
 Branch: `feature/autonomous-live-trading-platform`
 Draft PR: `#8`
 
@@ -46,6 +46,7 @@ Core rule: **processes recover where safe; capital permission fails closed.** Re
 - Alpaca submit/cancel and IBKR submit/confirmation/cancel classify HTTP 408/429 as ambiguous `UNKNOWN`, not definite rejection.
 - Unknown execution outcomes reconcile before retry; if reconciliation is absent or itself remains `UNKNOWN`, capital transitions to HALTED rather than allowing unresolved broker truth to coexist with ACTIVE state.
 - Feed/cycle failures can HALT capital while process recovery continues.
+- Runtime shutdown now bounds cancellation wait across owned top-level tasks and records per-task shutdown timeout/exception evidence instead of allowing a cancellation-resistant task to block teardown indefinitely.
 - IBKR account observation exhausts the provider's paginated position endpoint until an empty terminal page before constructing portfolio/risk truth; HTTP failures, malformed pages, or partial coverage are not reinterpreted as a flat account.
 - IBKR reconciliation checks open orders first, then the full provider-supported seven-day execution-history window when an order has disappeared from the open-order view, then confirms authoritative terminal state via the order-status endpoint. Trade history is a recovery locator, never proof of a full fill, and finite provider history is not treated as globally complete.
 - Alpaca reconciliation lookup binds successful REST evidence to the exact queried client-order id; contradictory or missing response identity returns `UNKNOWN` and cannot import an unrelated fill into local order truth.
@@ -95,6 +96,15 @@ Core rule: **processes recover where safe; capital permission fails closed.** Re
 - Runtime never self-modifies strategy code/parameters or automatically skips promotion stages.
 
 ## Latest verification baseline
+
+### Bounded runtime task shutdown
+
+- External trigger: NautilusTrader commit `4c186912775c07c57c8630e807807b3932ead979` on 2026-08-31 standardized adapter task lifecycles around generation-safe ownership, bounded observable shutdown, cancellation-safe teardown, and race/reconnect/failed-startup tests. NautilusTrader is LGPL-3.0; no source was copied.
+- Local audit found `ApplicationState.stop()` cancelled its owned runtime tasks and then awaited each one without a timeout, so a cancellation-resistant task could indefinitely block application teardown.
+- Deterministic RED commit `fa6c6e86eb0b453fa71fc5adec8abe20711b7228`, CI `#697`: Python 3.12 full pytest produced exactly `1 failed, 290 passed`; the new contract observed shutdown taking about `0.1503s` despite a test timeout target of `0.01s`.
+- Production implementation `ef6ba115967a24378417af0514f68b6082177962` adds one bounded wait across all owned top-level tasks and per-task shutdown timeout/exception evidence; lint/minimalization follow-up `f6ba1efbd818e67394663dd9b5f591eab1bfd4c6` preserves the behavior without adding a dependency or parallel task-generation abstraction.
+- Code-head CI `#701` passed Python 3.12 and 3.13 with Ruff, full pytest, compileall, engineering-skill verification and dependency audit; container verification was still completing when the documentation/status commit was prepared, so the final documentation exact head must itself remain CI-clean before replacing that baseline.
+- Provenance: `docs/upstream/2026-08-31-runtime-task-shutdown.md`.
 
 ### Alpaca regular-session execution eligibility
 
@@ -215,28 +225,30 @@ Unknown-outcome halt follow-up: `docs/upstream/2026-08-27-unknown-outcome-reconc
 IBKR position-pagination follow-up: `docs/upstream/2026-08-28-ibkr-position-pagination.md`.
 Wheel-only third-party install follow-up: `docs/upstream/2026-08-29-wheel-only-third-party-installs.md`.
 Alpaca market-session execution follow-up: `docs/upstream/2026-08-30-alpaca-market-session-gate.md`.
+Runtime task-shutdown follow-up: `docs/upstream/2026-08-31-runtime-task-shutdown.md`.
 
 Current evidence queue:
 
-1. HKUDS/Vibe-Trading `6d988117...` — a market-triggered autonomous decision must not silently queue into a later trading session. The analogous local Alpaca DAY-order gap is closed with provider-clock authority before mutation; preserve this invariant for future brokers/order types and treat explicit extended-hours trading as a separate reviewed capability.
-2. NautilusTrader `1308d94...` — unavailable or partial bulk position coverage must not be treated as affirmative flat-position evidence. The analogous local IBKR first-page-only gap is closed by exhausting the provider's paginated position endpoint before constructing portfolio/risk truth.
-3. NautilusTrader `f2b2add...` — request correlation must survive timeouts until definitive evidence or shutdown. The analogous local `UNKNOWN -> UNKNOWN` capital-state gap is closed; preserve the invariant that unresolved broker truth cannot coexist with ACTIVE capital permission.
-4. NautilusTrader `5a2d980...` — finite broker history must never be represented as complete outside its provider-retained window. The local IBKR adapter now uses the official seven-day maximum instead of one day, while durable local identity/checkpoints remain necessary beyond provider retention.
-5. NautilusTrader `8aa30f9...` — strict reducing-exit versus new-risk bounds; analogous local gap is closed with RED/GREEN evidence. Preserve the rule that only proven non-reversing reductions can bypass exposure-creation bounds, while stale/unknown account state and HALTED continue to fail closed.
-6. QuantConnect IBKR issue #249 — local analogous open-order blind spot addressed with official IBKR trade-history + terminal-status recovery; continue auditing reconnect/recovery semantics.
-7. NautilusTrader `d2b1221...` — ambiguous transport outcome classification; current 408/429 broker mutation gaps are closed, preserve invariant for future mutations.
-8. NautilusTrader `6cb6afc...` — connection epoch / desired-vs-acknowledged subscription recovery; adopt only if local failure injection proves a gap.
-9. NautilusTrader `ccc80cdb...` — reconciliation authority/evidence binding; analogous Alpaca lookup identity gap closed locally, and future broker recovery must bind evidence to the strongest available order/account/instrument identity before accepting terminal truth.
-10. Alpaca Python SDK `8b466396...` — reconnect jitter, half-open cleanup, optional silence timeout, control/data frame separation. Half-open/auth cleanup is covered locally. A naive fixed silence timeout is not safe for stock bars across closed-market periods; connected-but-mute detection still needs session/provider-aware semantics before production adoption.
-11. QuantConnect LEAN `78232af...` — backup live data pattern; no invisible fallback may satisfy safety-critical live freshness.
-12. QuantConnect LEAN `09e96f...` — duplicate shared-bar correctness independently supports the existing revision/completed-cycle invariant.
-13. NautilusTrader `338c28e...` — third-party package resolution must not silently gain build-backend execution merely because a compatible wheel is unavailable. The local CI/audit/Docker paths now fail closed on source-distribution fallback while still building the checked-out local project.
+1. NautilusTrader `4c186912...` — owned long-running tasks must have bounded, observable teardown. The analogous local unbounded `ApplicationState.stop()` gap is closed with one global timeout and per-task shutdown evidence; generation-token/task-group machinery remains deferred until overlapping runtime generations actually exist.
+2. HKUDS/Vibe-Trading `6d988117...` — a market-triggered autonomous decision must not silently queue into a later trading session. The analogous local Alpaca DAY-order gap is closed with provider-clock authority before mutation; preserve this invariant for future brokers/order types and treat explicit extended-hours trading as a separate reviewed capability.
+3. NautilusTrader `1308d94...` — unavailable or partial bulk position coverage must not be treated as affirmative flat-position evidence. The analogous local IBKR first-page-only gap is closed by exhausting the provider's paginated position endpoint before constructing portfolio/risk truth.
+4. NautilusTrader `f2b2add...` — request correlation must survive timeouts until definitive evidence or shutdown. The analogous local `UNKNOWN -> UNKNOWN` capital-state gap is closed; preserve the invariant that unresolved broker truth cannot coexist with ACTIVE capital permission.
+5. NautilusTrader `5a2d980...` — finite broker history must never be represented as complete outside its provider-retained window. The local IBKR adapter now uses the official seven-day maximum instead of one day, while durable local identity/checkpoints remain necessary beyond provider retention.
+6. NautilusTrader `8aa30f9...` — strict reducing-exit versus new-risk bounds; analogous local gap is closed with RED/GREEN evidence. Preserve the rule that only proven non-reversing reductions can bypass exposure-creation bounds, while stale/unknown account state and HALTED continue to fail closed.
+7. QuantConnect IBKR issue #249 — local analogous open-order blind spot addressed with official IBKR trade-history + terminal-status recovery; continue auditing reconnect/recovery semantics.
+8. NautilusTrader `d2b1221...` — ambiguous transport outcome classification; current 408/429 broker mutation gaps are closed, preserve invariant for future mutations.
+9. NautilusTrader `6cb6afc...` — connection epoch / desired-vs-acknowledged subscription recovery; adopt only if local failure injection proves a gap.
+10. NautilusTrader `ccc80cdb...` — reconciliation authority/evidence binding; analogous Alpaca lookup identity gap closed locally, and future broker recovery must bind evidence to the strongest available order/account/instrument identity before accepting terminal truth.
+11. Alpaca Python SDK `8b466396...` — reconnect jitter, half-open cleanup, optional silence timeout, control/data frame separation. Half-open/auth cleanup is covered locally. A naive fixed silence timeout is not safe for stock bars across closed-market periods; connected-but-mute detection still needs session/provider-aware semantics before production adoption.
+12. QuantConnect LEAN `78232af...` — backup live data pattern; no invisible fallback may satisfy safety-critical live freshness.
+13. QuantConnect LEAN `09e96f...` — duplicate shared-bar correctness independently supports the existing revision/completed-cycle invariant.
+14. NautilusTrader `338c28e...` — third-party package resolution must not silently gain build-backend execution merely because a compatible wheel is unavailable. The local CI/audit/Docker paths now fail closed on source-distribution fallback while still building the checked-out local project.
 
 No external repository is integrated merely because it is new or popular. Every external adaptation must retain provenance/license review and local RED/GREEN evidence.
 
 ## Immediate engineering queue
 
-1. Preserve exact-head CI after the Alpaca market-session gate, provenance, direction, and status update.
+1. Preserve exact-head CI after the bounded runtime-shutdown implementation, provenance, and status update.
 2. Continue Alpaca WebSocket resilience review, but do not add a naive fixed stock-bar silence timeout that would misclassify market-closed periods; require session/provider-aware evidence first.
 3. Collect real NVDA/SPCX/KLAC observed-fill and coverage evidence in monitor-only/paper-safe or broker-paper configuration when runtime credentials are available outside Git; verified broker-paper fills, not mode labels alone, are required for LIVE evidence depth.
 4. Extend execution-friction evidence toward observed exit fills only when an auditable entry-to-exit execution identity exists; keep fixed-horizon exits explicitly modeled until then.
