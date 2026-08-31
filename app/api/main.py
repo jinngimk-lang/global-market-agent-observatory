@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
+from app.api.market_history import build_market_history_router
 from app.api.operator import build_operator_router
 from app.api.state import ApplicationState
 from app.broker.base import AccountObserver
@@ -79,6 +80,9 @@ def create_app(
     app.state.runtime = runtime
     app.include_router(
         build_operator_router(settings=resolved_settings, runtime=runtime)
+    )
+    app.include_router(
+        build_market_history_router(settings=resolved_settings, runtime=runtime)
     )
 
     @app.middleware("http")
