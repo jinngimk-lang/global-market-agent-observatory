@@ -55,3 +55,38 @@ async def test_options_structure_loop_survives_unexpected_iteration_failure(
     assert state.last_options_structure_loop_error == (
         "RuntimeError: transient options loop failure"
     )
+
+
+@pytest.mark.asyncio
+async def test_runtime_stop_is_bounded_when_task_ignores_cancellation(tmp_path) -> None:
+    state = ApplicationState(
+        Settings(
+            database_path=str(tmp_path / "bounded-shutdown.db"),
+            strategy_learning_enabled=False,
+        )
+    )
+    state._shutdown_task_timeout_seconds = 0.01
+    release = asyncio.Event()
+
+    async def stubborn_task() -> None:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    task = asyncio.create_task(stubborn_task(), name="market-feed")
+    state._feed_task = task
+
+    async def release_later() -> None:
+        await asyncio.sleep(0.15)
+        release.set()
+
+    releaser = asyncio.create_task(release_later())
+    started = asyncio.get_running_loop().time()
+    await state.stop()
+    elapsed = asyncio.get_running_loop().time() - started
+    await releaser
+    await task
+
+    assert elapsed < 0.08
+    assert state.shutdown_errors == {"market-feed": "shutdown_timeout"}
