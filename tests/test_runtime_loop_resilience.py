@@ -67,8 +67,10 @@ async def test_runtime_stop_is_bounded_when_task_ignores_cancellation(tmp_path) 
     )
     state._shutdown_task_timeout_seconds = 0.01
     release = asyncio.Event()
+    started_task = asyncio.Event()
 
     async def stubborn_task() -> None:
+        started_task.set()
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
@@ -76,6 +78,7 @@ async def test_runtime_stop_is_bounded_when_task_ignores_cancellation(tmp_path) 
 
     task = asyncio.create_task(stubborn_task(), name="market-feed")
     state._feed_task = task
+    await started_task.wait()
 
     async def release_later() -> None:
         await asyncio.sleep(0.15)
@@ -86,7 +89,10 @@ async def test_runtime_stop_is_bounded_when_task_ignores_cancellation(tmp_path) 
     await state.stop()
     elapsed = asyncio.get_running_loop().time() - started
     await releaser
-    await task
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
     assert elapsed < 0.08
     assert state.shutdown_errors == {"market-feed": "shutdown_timeout"}
