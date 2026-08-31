@@ -6,6 +6,7 @@
   <meta name="color-scheme" content="dark">
   <title>Autonomous Trading Console</title>
   <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/advanced-market-chart.css">
   <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -65,17 +66,45 @@
     </section>
 
     <section class="panel chart-panel">
-      <div class="panel-heading">
-        <div>
+      <div class="panel-heading market-chart-heading">
+        <div class="market-chart-heading-main">
           <p class="label">行情上下文</p>
-          <h2 id="symbol-title">—</h2>
+          <h2 id="market-chart-title">—</h2>
         </div>
-        <div class="price-block">
-          <strong id="last-price">—</strong>
-          <span id="feed-source">waiting for feed</span>
+        <div class="market-chart-controls">
+          <div id="market-period-switcher" class="market-period-switcher" aria-label="行情周期">
+            <button type="button" class="market-period-button active" data-market-period="1m" aria-pressed="true">分时</button>
+            <button type="button" class="market-period-button" data-market-period="1Day" aria-pressed="false">日K</button>
+            <button type="button" class="market-period-button" data-market-period="1Week" aria-pressed="false">周K</button>
+            <button type="button" class="market-period-button" data-market-period="1Month" aria-pressed="false">月K</button>
+          </div>
+          <div class="market-chart-price">
+            <strong id="market-chart-last-price">—</strong>
+            <span id="market-chart-source">等待行情来源</span>
+          </div>
         </div>
       </div>
-      <div id="chart" aria-label="实时K线图"></div>
+      <div class="market-chart-toolbar">
+        <div id="market-chart-legend" class="market-chart-legend">
+          <span><strong>成交量</strong></span>
+          <span><strong>MA20</strong></span>
+          <span><strong>MA60</strong></span>
+          <span>算法支撑 <strong id="market-support-value" class="market-level-value">—</strong></span>
+          <span>算法压力 <strong id="market-resistance-value" class="market-level-value">—</strong></span>
+        </div>
+        <span id="market-chart-stream-state" class="market-stream-state muted">等待实时流</span>
+      </div>
+      <div class="market-chart-stage">
+        <div id="advanced-market-chart" aria-label="多周期股票K线图"></div>
+        <div id="market-chart-loading" class="market-chart-loading" hidden>正在读取可验证行情…</div>
+        <div id="market-chart-empty" class="market-chart-empty" hidden>无可验证历史数据</div>
+      </div>
+      <div class="legacy-chart-compat" aria-hidden="true">
+        <span id="symbol-title">—</span>
+        <span id="last-price">—</span>
+        <span id="feed-source">—</span>
+        <div id="chart" aria-label="兼容实时K线图"></div>
+      </div>
     </section>
 
     <section class="panel chain-panel">
@@ -189,6 +218,7 @@
   <script src="/static/runtime.js"></script>
   <script src="/static/market-client.js"></script>
   <script src="/static/backend-actions.js"></script>
+  <script src="/static/advanced-market-chart.js" defer></script>
   <script src="/static/app.js" defer></script>
   <script src="/static/strategy-health-attribution.js" defer></script>
 </body>
