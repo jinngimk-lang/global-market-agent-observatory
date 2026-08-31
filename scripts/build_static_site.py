@@ -36,6 +36,7 @@ STATIC_CSP_META = """  <meta http-equiv="Content-Security-Policy" content="defau
 
 ASSET_NAMES = (
     "styles.css",
+    "advanced-market-chart.css",
     "runtime.js",
     "market-client.js",
     "app.js",
