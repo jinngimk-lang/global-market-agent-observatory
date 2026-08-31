@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import UTC, datetime
 from decimal import Decimal
 
@@ -38,6 +39,9 @@ from app.trading.portfolio_source import (
     PortfolioSource,
 )
 from app.trading.state_store import SQLiteTradingStateStore
+
+
+logger = logging.getLogger(__name__)
 
 
 class ApplicationState:
@@ -205,6 +209,8 @@ class ApplicationState:
         self.last_cycle_errors: dict[str, str] = {}
         self.last_market_feed_error: str | None = None
         self.market_feed_failure_count = 0
+        self.shutdown_errors: dict[str, str] = {}
+        self._shutdown_task_timeout_seconds = 5.0
         self._feed_task: asyncio.Task[None] | None = None
         self._account_task: asyncio.Task[None] | None = None
         self._improvement_task: asyncio.Task[None] | None = None
@@ -288,23 +294,43 @@ class ApplicationState:
             )
 
     async def stop(self) -> None:
-        tasks = [
-            task
-            for task in (
-                self._feed_task,
-                self._account_task,
-                self._improvement_task,
-                self._options_structure_task,
+        named_tasks = {
+            name: task
+            for name, task in (
+                ("market-feed", self._feed_task),
+                ("account-observers", self._account_task),
+                ("continuous-improvement", self._improvement_task),
+                ("options-structure", self._options_structure_task),
             )
             if task is not None
-        ]
-        for task in tasks:
+        }
+        self.shutdown_errors = {}
+        for task in named_tasks.values():
             task.cancel()
-        for task in tasks:
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
+        if named_tasks:
+            done, pending = await asyncio.wait(
+                named_tasks.values(),
+                timeout=self._shutdown_task_timeout_seconds,
+            )
+            for name, task in named_tasks.items():
+                if task in pending:
+                    self.shutdown_errors[name] = "shutdown_timeout"
+                    logger.error(
+                        "runtime task %s did not stop within %.3fs",
+                        name,
+                        self._shutdown_task_timeout_seconds,
+                    )
+                    task.cancel()
+                    continue
+                if task in done:
+                    try:
+                        task.result()
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception as exc:
+                        message = f"{type(exc).__name__}: {exc}"
+                        self.shutdown_errors[name] = message
+                        logger.error("runtime task %s failed during shutdown: %s", name, message)
         self._feed_task = None
         self._account_task = None
         self._improvement_task = None
