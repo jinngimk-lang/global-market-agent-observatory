@@ -40,6 +40,7 @@ ASSET_NAMES = (
     "market-client.js",
     "app.js",
     "symbol-switcher.js",
+    "advanced-market-chart.js",
 )
 
 
