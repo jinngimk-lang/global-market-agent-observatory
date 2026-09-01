@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.domain.models import Candle
 
 _TIMEFRAME_INTERVALS = {
+    "1Min": "1m",
     "1Day": "1d",
     "1Week": "1w",
     "1Month": "1mo",
@@ -86,7 +87,10 @@ class AlpacaHistoricalBarsClient:
                 "limit": limit,
                 "feed": self.feed,
                 "adjustment": "raw",
-                "sort": "asc",
+                # Request the newest provider bars, then normalize them back to
+                # chronological order for charting. This avoids returning the
+                # oldest page when no explicit start time is supplied.
+                "sort": "desc",
             },
             headers=self._headers,
         )
@@ -96,7 +100,9 @@ class AlpacaHistoricalBarsClient:
             raise RuntimeError("Unexpected Alpaca historical bars payload")
         raw_bars = payload.get("bars")
         if not isinstance(raw_bars, list):
-            raise RuntimeError("Unexpected Alpaca historical bars payload: bars payload is not a list")
+            raise RuntimeError(
+                "Unexpected Alpaca historical bars payload: bars payload is not a list"
+            )
 
         observed = fetched_at or datetime.now(UTC)
         if observed.tzinfo is None:
@@ -104,17 +110,20 @@ class AlpacaHistoricalBarsClient:
         observed = observed.astimezone(UTC)
         interval = _TIMEFRAME_INTERVALS[timeframe]
         source = f"alpaca:{self.feed}:historical"
-        candles = [
-            self._normalize_bar(
-                normalized_symbol,
-                timeframe=timeframe,
-                interval=interval,
-                source=source,
-                item=item,
-            )
-            for item in raw_bars
-            if isinstance(item, dict)
-        ]
+        candles = sorted(
+            [
+                self._normalize_bar(
+                    normalized_symbol,
+                    timeframe=timeframe,
+                    interval=interval,
+                    source=source,
+                    item=item,
+                )
+                for item in raw_bars
+                if isinstance(item, dict)
+            ],
+            key=lambda item: item.open_time,
+        )
 
         return HistoricalBarsResult(
             symbol=normalized_symbol,
@@ -162,6 +171,8 @@ class AlpacaHistoricalBarsClient:
 
     @staticmethod
     def _close_time(opened: datetime, timeframe: str) -> datetime:
+        if timeframe == "1Min":
+            return opened + timedelta(minutes=1)
         if timeframe == "1Day":
             return opened + timedelta(days=1)
         if timeframe == "1Week":
