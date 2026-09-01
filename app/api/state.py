@@ -15,6 +15,7 @@ from app.innovation.gate import PromotionPolicy
 from app.innovation.registry import RuntimeStrategyPromotion, StrategyPromotionRegistry
 from app.innovation.store import SQLiteStrategyEvidenceStore
 from app.intelligence.alpaca_news import AlpacaNewsStream
+from app.intelligence.government import FederalRegisterClient
 from app.intelligence.sec import SecSubmissionClient
 from app.intelligence.service import ContextIntelligenceService
 from app.intelligence.store import SQLiteContextStore
@@ -62,8 +63,13 @@ class ApplicationState:
         self.context_store = SQLiteContextStore(settings.database_path)
         context_news_stream = None
         context_sec_client = None
+        context_government_client = None
         if settings.context_intelligence_enabled:
             context_sec_client = SecSubmissionClient(user_agent=settings.sec_user_agent)
+            if settings.context_government_terms:
+                context_government_client = FederalRegisterClient(
+                    symbol_terms=settings.context_government_terms,
+                )
             if settings.alpaca_api_key and settings.alpaca_api_secret:
                 context_news_stream = AlpacaNewsStream(
                     symbols=settings.trading_universe,
@@ -75,6 +81,7 @@ class ApplicationState:
             symbols=settings.trading_universe,
             news_stream=context_news_stream,
             sec_client=context_sec_client,
+            government_client=context_government_client,
             sec_poll_seconds=settings.context_sec_poll_seconds,
             government_poll_seconds=settings.context_government_poll_seconds,
             retry_seconds=settings.context_retry_seconds,
