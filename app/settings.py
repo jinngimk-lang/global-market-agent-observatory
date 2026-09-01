@@ -8,6 +8,30 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, m
 from app.domain.models import ExecutionProvider, TradingMode
 
 LIVE_CONFIRMATION_PHRASE = "I_UNDERSTAND_LIVE_TRADING"
+DEFAULT_CONTEXT_GOVERNMENT_TERMS: dict[str, list[str]] = {
+    "NVDA": ["NVIDIA", "advanced computing", "semiconductor", "export control"],
+    "KLAC": ["KLA", "semiconductor equipment", "advanced computing", "export control"],
+    "SPCX": ["SpaceX", "Starlink", "commercial space"],
+}
+
+
+def _parse_context_government_terms(raw: str) -> dict[str, list[str]]:
+    result: dict[str, list[str]] = {}
+    for item in raw.split(";"):
+        if not item.strip() or "=" not in item:
+            continue
+        symbol, raw_terms = item.split("=", 1)
+        terms = [term.strip() for term in raw_terms.split("|") if term.strip()]
+        if symbol.strip() and terms:
+            result[symbol.strip().upper()] = terms
+    return result
+
+
+def _default_context_government_terms() -> dict[str, list[str]]:
+    return {
+        symbol: list(terms)
+        for symbol, terms in DEFAULT_CONTEXT_GOVERNMENT_TERMS.items()
+    }
 
 
 class Settings(BaseModel):
@@ -59,6 +83,9 @@ class Settings(BaseModel):
     context_intelligence_enabled: bool = False
     context_sec_poll_seconds: float = 60.0
     context_government_poll_seconds: float = 300.0
+    context_government_terms: dict[str, list[str]] = Field(
+        default_factory=_default_context_government_terms
+    )
     context_retry_seconds: float = 2.0
     context_retry_max_seconds: float = 60.0
     context_recent_limit: int = 20
@@ -132,6 +159,19 @@ class Settings(BaseModel):
             for symbol, group in values.items()
             if symbol.strip() and group.strip()
         }
+
+    @field_validator("context_government_terms")
+    @classmethod
+    def normalize_context_government_terms(
+        cls,
+        values: dict[str, list[str]],
+    ) -> dict[str, list[str]]:
+        normalized: dict[str, list[str]] = {}
+        for symbol, terms in values.items():
+            clean_terms = [term.strip() for term in terms if term.strip()]
+            if symbol.strip() and clean_terms:
+                normalized[symbol.strip().upper()] = clean_terms
+        return normalized
 
     @field_validator("risk_fraction_per_trade", "reduce_fraction")
     @classmethod
@@ -270,6 +310,13 @@ class Settings(BaseModel):
             symbol, group = item.split("=", 1)
             if symbol.strip() and group.strip():
                 symbol_groups[symbol.strip().upper()] = group.strip()
+        default_government_terms = ";".join(
+            f"{symbol}={'|'.join(terms)}"
+            for symbol, terms in DEFAULT_CONTEXT_GOVERNMENT_TERMS.items()
+        )
+        context_government_terms = _parse_context_government_terms(
+            os.getenv("CONTEXT_GOVERNMENT_TERMS", default_government_terms)
+        )
         sec_ciks = [
             item.strip() for item in os.getenv("SEC_CIKS", "").split(",") if item.strip()
         ]
@@ -341,6 +388,7 @@ class Settings(BaseModel):
             context_government_poll_seconds=float(
                 os.getenv("CONTEXT_GOVERNMENT_POLL_SECONDS", "300")
             ),
+            context_government_terms=context_government_terms,
             context_retry_seconds=float(os.getenv("CONTEXT_RETRY_SECONDS", "2")),
             context_retry_max_seconds=float(
                 os.getenv("CONTEXT_RETRY_MAX_SECONDS", "60")
