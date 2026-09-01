@@ -21,14 +21,15 @@
       `/api/market/history/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=${encodeURIComponent(limit)}`,
       'market history',
     );
-    const loadIntelligence = (symbol) => get(
-      `/api/intelligence/${encodeURIComponent(symbol)}`,
-      'context intelligence',
-    );
-    const loadIntelligenceStatus = () => get(
-      '/api/intelligence/status',
-      'context intelligence status',
-    );
+    async function loadIntelligence(symbol) {
+      return get(
+        `/api/intelligence/${encodeURIComponent(symbol)}`,
+        'context intelligence',
+      );
+    }
+    async function loadIntelligenceStatus() {
+      return get('/api/intelligence/status', 'context intelligence status');
+    }
     const loadPortfolio = () => get('/api/portfolio', 'portfolio');
     const loadOrders = (limit = 50) => get(
       `/api/orders?limit=${encodeURIComponent(limit)}`,
