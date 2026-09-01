@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
-
 from app.intelligence.government import FederalRegisterClient
+
 from app.intelligence.models import EvidenceKind
 
 
