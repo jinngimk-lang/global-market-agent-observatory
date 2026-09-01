@@ -14,6 +14,10 @@ from app.execution.controller import ExecutionController
 from app.innovation.gate import PromotionPolicy
 from app.innovation.registry import RuntimeStrategyPromotion, StrategyPromotionRegistry
 from app.innovation.store import SQLiteStrategyEvidenceStore
+from app.intelligence.alpaca_news import AlpacaNewsStream
+from app.intelligence.sec import SecSubmissionClient
+from app.intelligence.service import ContextIntelligenceService
+from app.intelligence.store import SQLiteContextStore
 from app.learning.models import StrategyHealth, StrategyHealthPolicy
 from app.learning.service import StrategyLearningService
 from app.learning.store import SQLiteStrategyLearningStore
@@ -54,6 +58,28 @@ class ApplicationState:
             starting_cash=settings.starting_cash,
         )
         self.hub = MarketHub(queue_size=200)
+
+        self.context_store = SQLiteContextStore(settings.database_path)
+        context_news_stream = None
+        context_sec_client = None
+        if settings.context_intelligence_enabled:
+            context_sec_client = SecSubmissionClient(user_agent=settings.sec_user_agent)
+            if settings.alpaca_api_key and settings.alpaca_api_secret:
+                context_news_stream = AlpacaNewsStream(
+                    symbols=settings.trading_universe,
+                    api_key=settings.alpaca_api_key.get_secret_value(),
+                    api_secret=settings.alpaca_api_secret.get_secret_value(),
+                )
+        self.context_intelligence = ContextIntelligenceService(
+            store=self.context_store,
+            symbols=settings.trading_universe,
+            news_stream=context_news_stream,
+            sec_client=context_sec_client,
+            sec_poll_seconds=settings.context_sec_poll_seconds,
+            government_poll_seconds=settings.context_government_poll_seconds,
+            retry_seconds=settings.context_retry_seconds,
+            retry_max_seconds=settings.context_retry_max_seconds,
+        )
 
         # Compatibility-only paper broker for legacy read/paper API endpoints.
         # It is never swapped for a live adapter.
@@ -288,6 +314,7 @@ class ApplicationState:
                 self._run_options_structure(),
                 name="options-structure",
             )
+        await self.context_intelligence.start()
 
     async def stop(self) -> None:
         named_tasks = {
@@ -324,6 +351,10 @@ class ApplicationState:
         self._account_task = None
         self._improvement_task = None
         self._options_structure_task = None
+        try:
+            await self.context_intelligence.stop()
+        except Exception as exc:
+            self.shutdown_errors["context-intelligence"] = f"{type(exc).__name__}: {exc}"
         if self._owns_options_chain_source and self.options_chain_source is not None:
             close = getattr(self.options_chain_source, "close", None)
             if close is not None:
