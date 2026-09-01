@@ -7,6 +7,7 @@
   <title>Autonomous Trading Console</title>
   <link rel="stylesheet" href="/static/styles.css">
   <link rel="stylesheet" href="/static/advanced-market-chart.css">
+  <link rel="stylesheet" href="/static/context-intelligence.css">
   <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
@@ -120,6 +121,47 @@
       </div>
     </section>
 
+    <section id="context-intelligence-panel" class="panel context-intelligence-panel">
+      <div class="panel-heading context-intelligence-heading">
+        <div>
+          <p class="label">实时上下文情报</p>
+          <h2><span id="context-intelligence-symbol">—</span> 综合情报</h2>
+        </div>
+        <span id="context-execution-authority" class="context-authority">仅作上下文证据，不代表交易许可</span>
+      </div>
+      <div class="context-synthesis-wrap">
+        <div>
+          <span>综合判断</span>
+          <p id="context-synthesis">NO VERIFIED DATA</p>
+        </div>
+        <div id="context-source-health">情报源状态：等待后端</div>
+      </div>
+      <div class="context-column-heading">
+        <strong>新鲜度 / 延迟</strong>
+        <span>Freshness is part of truth</span>
+      </div>
+      <div id="context-freshness-strip" class="context-freshness-strip"></div>
+      <div class="context-columns">
+        <section class="context-column">
+          <div class="context-column-heading"><strong>实时新闻</strong><span>保留原标题与原始来源</span></div>
+          <div id="context-news" class="context-list"><p class="context-empty">NO VERIFIED DATA</p></div>
+        </section>
+        <section class="context-column">
+          <div class="context-column-heading"><strong>SEC / 公司披露</strong><span>官方 filing 优先</span></div>
+          <div id="context-filings" class="context-list"><p class="context-empty">NO VERIFIED DATA</p></div>
+        </section>
+        <section class="context-column">
+          <div class="context-column-heading"><strong>政府 / 监管</strong><span>官方发布时间与生效时间分开</span></div>
+          <div id="context-government" class="context-list"><p class="context-empty">NO VERIFIED DATA</p></div>
+        </section>
+        <section class="context-column">
+          <div class="context-column-heading"><strong>资金行为</strong><span>VWAP / OFI / GEX / Wall，可验证派生证据</span></div>
+          <div id="context-flow" class="context-list"><p class="context-empty">NO VERIFIED DATA</p></div>
+        </section>
+      </div>
+      <div class="context-note">中文界面负责解释状态与证据类型；新闻、SEC 与政府文件保留原始标题/链接，避免未经验证的自动翻译改变事实含义。DELAYED / STALE 数据不会冒充实时。</div>
+    </section>
+
     <section class="panel portfolio-panel">
       <div class="panel-heading">
         <div>
@@ -221,6 +263,7 @@
   <script src="/static/advanced-market-chart.js" defer></script>
   <script src="/static/native-market-chart.js" defer></script>
   <script src="/static/app.js" defer></script>
+  <script src="/static/context-intelligence.js" defer></script>
   <script src="/static/strategy-health-attribution.js" defer></script>
 </body>
 </html>
