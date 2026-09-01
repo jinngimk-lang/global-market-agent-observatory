@@ -1,20 +1,11 @@
-from __future__ import annotations
-
-from pathlib import Path
-
 import pytest
 
 from scripts.enable_readonly_realtime import enable_readonly_realtime
 
 
-def _write(path: Path, text: str) -> None:
-    path.write_text(text, encoding="utf-8")
-
-
 def test_enable_readonly_realtime_preserves_secrets_and_disables_execution(tmp_path) -> None:
     env = tmp_path / ".env"
-    _write(
-        env,
+    env.write_text(
         "\n".join(
             [
                 "TRADING_MODE=paper",
@@ -28,6 +19,7 @@ def test_enable_readonly_realtime_preserves_secrets_and_disables_execution(tmp_p
                 "",
             ]
         ),
+        encoding="utf-8",
     )
 
     backup = enable_readonly_realtime(env)
@@ -56,7 +48,7 @@ def test_enable_readonly_realtime_refuses_live_configuration(tmp_path) -> None:
             "",
         ]
     )
-    _write(env, original)
+    env.write_text(original, encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="live"):
         enable_readonly_realtime(env)
@@ -67,7 +59,7 @@ def test_enable_readonly_realtime_refuses_live_configuration(tmp_path) -> None:
 def test_enable_readonly_realtime_requires_local_alpaca_credentials(tmp_path) -> None:
     env = tmp_path / ".env"
     original = "TRADING_MODE=paper\nMARKET_SOURCE=replay\n"
-    _write(env, original)
+    env.write_text(original, encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="Alpaca"):
         enable_readonly_realtime(env)
