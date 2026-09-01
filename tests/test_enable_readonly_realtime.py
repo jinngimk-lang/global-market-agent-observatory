@@ -1,5 +1,4 @@
 import pytest
-
 from scripts.enable_readonly_realtime import enable_readonly_realtime
 
 
