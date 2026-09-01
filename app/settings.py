@@ -54,6 +54,15 @@ class Settings(BaseModel):
     market_data_max_age_seconds: float = 5.0
     account_state_max_age_seconds: float = 30.0
 
+    # Read-only external context is isolated from the capital-permission chain.
+    # It is opt-in so upgrades do not unexpectedly start outbound source loops.
+    context_intelligence_enabled: bool = False
+    context_sec_poll_seconds: float = 60.0
+    context_government_poll_seconds: float = 300.0
+    context_retry_seconds: float = 2.0
+    context_retry_max_seconds: float = 60.0
+    context_recent_limit: int = 20
+
     # Continuous strategy evidence and degradation monitoring. This loop may
     # reduce/disable risk, but it never mutates strategy code/parameters or
     # promotes a strategy stage automatically.
@@ -145,11 +154,22 @@ class Settings(BaseModel):
         "options_structure_max_age_seconds",
         "market_feed_retry_seconds",
         "market_feed_retry_max_seconds",
+        "context_sec_poll_seconds",
+        "context_government_poll_seconds",
+        "context_retry_seconds",
+        "context_retry_max_seconds",
     )
     @classmethod
     def validate_positive_runtime_seconds(cls, value: float) -> float:
         if value <= 0:
             raise ValueError("runtime intervals must be positive")
+        return value
+
+    @field_validator("context_recent_limit")
+    @classmethod
+    def validate_context_recent_limit(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("CONTEXT_RECENT_LIMIT must be positive")
         return value
 
     @field_validator("options_expiration_horizon_days")
@@ -195,6 +215,8 @@ class Settings(BaseModel):
     def validate_runtime_safety(self) -> Settings:
         if self.auto_trading_enabled and not self.trading_universe:
             raise ValueError("AUTO_TRADING_ENABLED requires a non-empty TRADING_UNIVERSE")
+        if self.context_retry_seconds > self.context_retry_max_seconds:
+            raise ValueError("CONTEXT_RETRY_SECONDS must be <= CONTEXT_RETRY_MAX_SECONDS")
         if (
             self.strategy_degradation_window_observations
             < self.strategy_degradation_min_observations
@@ -248,7 +270,9 @@ class Settings(BaseModel):
             symbol, group = item.split("=", 1)
             if symbol.strip() and group.strip():
                 symbol_groups[symbol.strip().upper()] = group.strip()
-        sec_ciks = [item.strip() for item in os.getenv("SEC_CIKS", "").split(",") if item.strip()]
+        sec_ciks = [
+            item.strip() for item in os.getenv("SEC_CIKS", "").split(",") if item.strip()
+        ]
         ibkr_auto_confirm_message_ids = {
             item.strip()
             for item in os.getenv("IBKR_AUTO_CONFIRM_MESSAGE_IDS", "").split(",")
@@ -309,6 +333,19 @@ class Settings(BaseModel):
             max_portfolio_drawdown=Decimal(os.getenv("MAX_PORTFOLIO_DRAWDOWN", "5000")),
             market_data_max_age_seconds=float(os.getenv("MARKET_DATA_MAX_AGE_SECONDS", "5")),
             account_state_max_age_seconds=float(os.getenv("ACCOUNT_STATE_MAX_AGE_SECONDS", "30")),
+            context_intelligence_enabled=os.getenv(
+                "CONTEXT_INTELLIGENCE_ENABLED", "false"
+            ).lower()
+            in {"1", "true", "yes"},
+            context_sec_poll_seconds=float(os.getenv("CONTEXT_SEC_POLL_SECONDS", "60")),
+            context_government_poll_seconds=float(
+                os.getenv("CONTEXT_GOVERNMENT_POLL_SECONDS", "300")
+            ),
+            context_retry_seconds=float(os.getenv("CONTEXT_RETRY_SECONDS", "2")),
+            context_retry_max_seconds=float(
+                os.getenv("CONTEXT_RETRY_MAX_SECONDS", "60")
+            ),
+            context_recent_limit=int(os.getenv("CONTEXT_RECENT_LIMIT", "20")),
             strategy_learning_enabled=os.getenv("STRATEGY_LEARNING_ENABLED", "true").lower()
             in {"1", "true", "yes"},
             strategy_improvement_interval_seconds=float(
@@ -376,9 +413,11 @@ class Settings(BaseModel):
                 if os.getenv("CCXT_API_KEY")
                 else None
             ),
-            ccxt_secret=SecretStr(os.environ["CCXT_SECRET"])
-            if os.getenv("CCXT_SECRET")
-            else None,
+            ccxt_secret=(
+                SecretStr(os.environ["CCXT_SECRET"])
+                if os.getenv("CCXT_SECRET")
+                else None
+            ),
             ccxt_password=(
                 SecretStr(os.environ["CCXT_PASSWORD"])
                 if os.getenv("CCXT_PASSWORD")
@@ -392,7 +431,8 @@ class Settings(BaseModel):
             ibkr_base_url=os.getenv("IBKR_BASE_URL", "https://localhost:5000/v1/api"),
             ibkr_verify_ssl=os.getenv("IBKR_VERIFY_SSL", "false").lower()
             in {"1", "true", "yes"},
-            ibkr_paper=os.getenv("IBKR_PAPER", "true").lower() in {"1", "true", "yes"},
+            ibkr_paper=os.getenv("IBKR_PAPER", "true").lower()
+            in {"1", "true", "yes"},
             ibkr_auto_confirm_message_ids=ibkr_auto_confirm_message_ids,
             sec_user_agent=os.getenv("SEC_USER_AGENT", "Observatory admin@example.com"),
             sec_ciks=sec_ciks,
