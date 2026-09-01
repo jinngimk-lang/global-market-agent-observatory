@@ -5,9 +5,9 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from app.intelligence.service import ContextIntelligenceService
 
 from app.intelligence.models import ContextItem, ContextSource, EvidenceKind
+from app.intelligence.service import ContextIntelligenceService
 from app.intelligence.store import SQLiteContextStore
 
 
