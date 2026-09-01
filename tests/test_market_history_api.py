@@ -18,15 +18,17 @@ class FakeHistoryClient:
         self.calls.append((symbol, timeframe, limit))
         base = datetime(2026, 1, 1, tzinfo=UTC)
         candles = []
+        interval = "1m" if timeframe == "1Min" else "1d"
+        step = timedelta(minutes=1) if timeframe == "1Min" else timedelta(days=1)
         for index in range(8):
-            opened = base + timedelta(days=index)
+            opened = base + step * index
             close = 100 + index
             candles.append(
                 Candle(
                     symbol=symbol,
-                    interval="1d",
+                    interval=interval,
                     open_time=opened,
-                    close_time=opened + timedelta(days=1),
+                    close_time=opened + step,
                     open=close - 1,
                     high=close + (4 if index == 3 else 2),
                     low=close - (5 if index == 4 else 2),
@@ -101,19 +103,26 @@ def test_market_history_api_fails_explicitly_when_provider_is_unavailable(tmp_pa
         response = client.get("/api/market/history/NVDA?timeframe=1Month")
 
     assert response.status_code == 503
-    assert "historical" in response.json()["detail"].lower()
+    detail = response.json()["detail"]
+    assert detail["code"] == "historical_market_data_unconfigured"
+    assert "historical" in detail["message"].lower()
 
 
-def test_market_history_api_rejects_intraday_alias_instead_of_faking_history(tmp_path) -> None:
+def test_market_history_api_supports_verified_intraday_minute_history(tmp_path) -> None:
     settings = Settings(
         database_path=str(tmp_path / "history-timeframe.db"),
         trading_universe={"NVDA"},
         allowed_symbols={"NVDA", "BTCUSDT"},
     )
     app = create_app(settings)
-    app.state.runtime.historical_bars = FakeHistoryClient()
+    fake = FakeHistoryClient()
+    app.state.runtime.historical_bars = fake
 
     with TestClient(app) as client:
-        response = client.get("/api/market/history/NVDA?timeframe=1Min")
+        response = client.get("/api/market/history/NVDA?timeframe=1Min&limit=300")
 
-    assert response.status_code == 422
+    assert response.status_code == 200
+    body = response.json()
+    assert body["timeframe"] == "1Min"
+    assert body["candles"][0]["interval"] == "1m"
+    assert fake.calls == [("NVDA", "1Min", 300)]
