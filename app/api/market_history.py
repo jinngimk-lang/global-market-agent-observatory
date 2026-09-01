@@ -7,6 +7,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.api.intelligence import build_intelligence_router
 from app.domain.models import Candle
 from app.market.alpaca_history import AlpacaHistoricalBarsClient, HistoricalBarsResult
 from app.market.levels import SupportResistanceLevels, derive_support_resistance
@@ -81,9 +82,17 @@ def _unconfigured_history_error() -> HTTPException:
 
 
 def build_market_history_router(*, settings: Settings, runtime: object) -> APIRouter:
-    router = APIRouter(prefix="/api/market", tags=["market-history"])
+    """Compose the read-only dashboard market/context data routes.
 
-    @router.get("/history/{symbol}", response_model=MarketHistoryResponse)
+    The application already includes this router at startup. Keeping the market-history
+    and Context Intelligence routes in this read-only composition avoids adding any
+    control/mutation path and keeps execution authority separate.
+    """
+
+    router = APIRouter(tags=["market-history"])
+    router.include_router(build_intelligence_router(settings=settings, runtime=runtime))
+
+    @router.get("/api/market/history/{symbol}", response_model=MarketHistoryResponse)
     async def market_history(
         symbol: str,
         timeframe: HistoricalTimeframe,
