@@ -77,11 +77,17 @@ def test_snapshot_rejects_symbol_outside_configured_universe(tmp_path) -> None:
         service.snapshot("AAPL")
 
 
-class _FailingNewsStream:
-    async def stream(self):
-        if False:
-            yield _item(item_id="never")
+class _FailingNewsIterator:
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self) -> ContextItem:
         raise RuntimeError("news disconnected")
+
+
+class _FailingNewsStream:
+    def stream(self) -> _FailingNewsIterator:
+        return _FailingNewsIterator()
 
 
 @pytest.mark.asyncio
