@@ -2,15 +2,16 @@
   'use strict';
 
   const PERIODS = Object.freeze({
-    '1m': Object.freeze({label: '分时', limit: 300}),
-    '1Day': Object.freeze({label: '日K', limit: 260}),
-    '1Week': Object.freeze({label: '周K', limit: 260}),
-    '1Month': Object.freeze({label: '月K', limit: 120}),
+    '1m': Object.freeze({label: '分时', timeframe: '1Min', limit: 300}),
+    '1Day': Object.freeze({label: '日K', timeframe: '1Day', limit: 260}),
+    '1Week': Object.freeze({label: '周K', timeframe: '1Week', limit: 260}),
+    '1Month': Object.freeze({label: '月K', timeframe: '1Month', limit: 120}),
   });
   const COVERAGE_LABELS = Object.freeze({
     'single-exchange': 'IEX · 单交易所',
     'consolidated-us-market': 'SIP · 全美市场汇总',
     'consolidated-us-market-delayed': 'SIP · 延迟汇总',
+    'runtime-feed': '本地已验证实时存储',
   });
 
   function create() {
@@ -180,38 +181,30 @@
       chart.timeScale().fitContent();
     }
 
-    async function loadIntraday() {
-      let candles = [];
-      if (runtime.mode === 'backend') {
-        const response = await fetch(
-          `${runtime.apiBase}/api/candles/${encodeURIComponent(currentSymbol)}?interval=1m&limit=${PERIODS['1m'].limit}`,
-          {method: 'GET', credentials: 'same-origin', cache: 'no-store'},
+    async function loadVerifiedPeriod(period) {
+      const config = PERIODS[period];
+      if (runtime.mode === 'backend' && backend) {
+        const payload = await backend.loadMarketHistory(
+          currentSymbol,
+          config.timeframe,
+          config.limit,
         );
-        if (!response.ok) throw new Error(`intraday history failed: ${response.status}`);
-        candles = await response.json();
-      } else if (currentSymbol === runtime.market.symbol) {
-        candles = await marketClient.loadHistory(currentSymbol, '1m');
+        renderCandles(payload.candles || [], {
+          levels: payload.levels || null,
+          source: payload.source,
+          coverage: payload.coverage,
+        });
+        return;
       }
-      renderCandles(candles, {
-        source: candles.at(-1)?.source || '本地实时存储',
-        coverage: runtime.mode === 'backend' ? '实时 feed 覆盖见 Feed 状态' : 'public observe feed',
-      });
-    }
-
-    async function loadHistorical(period) {
-      if (runtime.mode !== 'backend' || !backend) {
-        throw new Error('无可验证历史数据：静态预览没有服务器端历史行情凭据');
+      if (period === '1m' && currentSymbol === runtime.market.symbol) {
+        const candles = await marketClient.loadHistory(currentSymbol, '1m');
+        renderCandles(candles, {
+          source: candles.at(-1)?.source || 'public observe feed',
+          coverage: 'public observe feed',
+        });
+        return;
       }
-      const payload = await backend.loadMarketHistory(
-        currentSymbol,
-        period,
-        PERIODS[period].limit,
-      );
-      renderCandles(payload.candles || [], {
-        levels: payload.levels || null,
-        source: payload.source,
-        coverage: payload.coverage,
-      });
+      throw new Error('无可验证历史数据：静态预览没有服务器端历史行情凭据');
     }
 
     async function loadPeriod(period) {
@@ -221,8 +214,7 @@
       setLoading(true);
       setEmpty('');
       try {
-        if (period === '1m') await loadIntraday();
-        else await loadHistorical(period);
+        await loadVerifiedPeriod(period);
       } catch (error) {
         console.error('advanced market chart load failed', error);
         activeCandles = [];
@@ -289,7 +281,7 @@
       const container = byId('advanced-market-chart');
       if (!container) return false;
       if (!global.LightweightCharts) {
-        setEmpty('图表组件未加载；行情真值仍可在决策卡查看。');
+        setEmpty('图表组件未加载；正在切换到本地图表渲染。');
         return false;
       }
       chart = LightweightCharts.createChart(container, {
