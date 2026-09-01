@@ -12,7 +12,7 @@ from app.market.alpaca_history import AlpacaHistoricalBarsClient, HistoricalBars
 from app.market.levels import SupportResistanceLevels, derive_support_resistance
 from app.settings import Settings
 
-HistoricalTimeframe = Literal["1Day", "1Week", "1Month"]
+HistoricalTimeframe = Literal["1Min", "1Day", "1Week", "1Month"]
 
 
 class HistoricalBarsProvider(Protocol):
@@ -38,6 +38,47 @@ class MarketHistoryResponse(BaseModel):
     levels: SupportResistanceLevels
 
 
+def _local_minute_history(
+    *,
+    runtime: object,
+    symbol: str,
+    limit: int,
+) -> MarketHistoryResponse | None:
+    store = getattr(runtime, "store", None)
+    if store is None:
+        return None
+    candles = store.list_candles(symbol, interval="1m", limit=limit)
+    if not candles:
+        return None
+    return MarketHistoryResponse(
+        symbol=symbol,
+        timeframe="1Min",
+        source="runtime-store",
+        feed="runtime",
+        coverage="runtime-feed",
+        generated_at=datetime.now(UTC),
+        candles=candles,
+        levels=derive_support_resistance(
+            candles,
+            pivot_width=2,
+            lookback=min(limit, 120),
+        ),
+    )
+
+
+def _unconfigured_history_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "code": "historical_market_data_unconfigured",
+            "message": (
+                "Verified stock history requires Alpaca market-data credentials; "
+                "minute history can fall back only when verified local candles exist."
+            ),
+        },
+    )
+
+
 def build_market_history_router(*, settings: Settings, runtime: object) -> APIRouter:
     router = APIRouter(prefix="/api/market", tags=["market-history"])
 
@@ -52,7 +93,10 @@ def build_market_history_router(*, settings: Settings, runtime: object) -> APIRo
         if normalized not in permitted:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="symbol is not in the configured equity trading universe",
+                detail={
+                    "code": "symbol_not_configured",
+                    "message": "Symbol is not in the configured equity trading universe.",
+                },
             )
 
         injected = hasattr(runtime, "historical_bars")
@@ -60,10 +104,15 @@ def build_market_history_router(*, settings: Settings, runtime: object) -> APIRo
         owned_provider: AlpacaHistoricalBarsClient | None = None
         if provider is None and not injected:
             if settings.alpaca_api_key is None or settings.alpaca_api_secret is None:
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="verified historical market-data provider is unavailable",
-                )
+                if timeframe == "1Min":
+                    local = _local_minute_history(
+                        runtime=runtime,
+                        symbol=normalized,
+                        limit=limit,
+                    )
+                    if local is not None:
+                        return local
+                raise _unconfigured_history_error()
             owned_provider = AlpacaHistoricalBarsClient(
                 api_key=settings.alpaca_api_key.get_secret_value(),
                 api_secret=settings.alpaca_api_secret.get_secret_value(),
@@ -71,10 +120,15 @@ def build_market_history_router(*, settings: Settings, runtime: object) -> APIRo
             )
             provider = owned_provider
         elif provider is None:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="verified historical market-data provider is unavailable",
-            )
+            if timeframe == "1Min":
+                local = _local_minute_history(
+                    runtime=runtime,
+                    symbol=normalized,
+                    limit=limit,
+                )
+                if local is not None:
+                    return local
+            raise _unconfigured_history_error()
 
         try:
             result = await provider.fetch(
@@ -83,9 +137,20 @@ def build_market_history_router(*, settings: Settings, runtime: object) -> APIRo
                 limit=limit,
             )
         except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+            if timeframe == "1Min":
+                local = _local_minute_history(
+                    runtime=runtime,
+                    symbol=normalized,
+                    limit=limit,
+                )
+                if local is not None:
+                    return local
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="verified historical market-data request failed",
+                detail={
+                    "code": "historical_market_data_failed",
+                    "message": "Verified historical market-data request failed.",
+                },
             ) from exc
         finally:
             if owned_provider is not None:
