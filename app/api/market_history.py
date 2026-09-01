@@ -72,8 +72,9 @@ def _unconfigured_history_error() -> HTTPException:
         detail={
             "code": "historical_market_data_unconfigured",
             "message": (
-                "Verified stock history requires Alpaca market-data credentials; "
-                "minute history can fall back only when verified local candles exist."
+                "Verified historical stock data requires Alpaca market-data "
+                "credentials; minute history can fall back only when verified "
+                "local candles exist."
             ),
         },
     )
