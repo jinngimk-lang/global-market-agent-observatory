@@ -164,7 +164,7 @@
       if (title) title.textContent = `${currentSymbol} · ${PERIODS[activePeriod].label}`;
     }
 
-    function renderCandles(items, *, levels = null, source = null, coverage = null) {
+    function renderCandles(items, {levels = null, source = null, coverage = null} = {}) {
       activeCandles = [...items];
       candleSeries.setData(items.map(candlePoint));
       volumeSeries.setData(items.map(volumePoint));
@@ -181,20 +181,40 @@
       chart.timeScale().fitContent();
     }
 
+    async function loadRuntimeMinuteFallback() {
+      const candles = await marketClient.loadHistory(currentSymbol, '1m');
+      if (!candles.length) return false;
+      renderCandles(candles, {
+        source: candles.at(-1)?.source || 'runtime-store',
+        coverage: 'runtime-feed',
+      });
+      return true;
+    }
+
     async function loadVerifiedPeriod(period) {
       const config = PERIODS[period];
       if (runtime.mode === 'backend' && backend) {
-        const payload = await backend.loadMarketHistory(
-          currentSymbol,
-          config.timeframe,
-          config.limit,
-        );
-        renderCandles(payload.candles || [], {
-          levels: payload.levels || null,
-          source: payload.source,
-          coverage: payload.coverage,
-        });
-        return;
+        try {
+          const payload = await backend.loadMarketHistory(
+            currentSymbol,
+            config.timeframe,
+            config.limit,
+          );
+          renderCandles(payload.candles || [], {
+            levels: payload.levels || null,
+            source: payload.source,
+            coverage: payload.coverage,
+          });
+          return;
+        } catch (error) {
+          // The equity history endpoint deliberately rejects non-equity feed
+          // symbols such as the local BTC replay. For 1m only, use the same
+          // verified runtime candle store exposed by /api/candles/{symbol}.
+          // This also preserves already-observed local stock bars if the
+          // external historical provider is temporarily unavailable.
+          if (period === '1m' && await loadRuntimeMinuteFallback()) return;
+          throw error;
+        }
       }
       if (period === '1m' && currentSymbol === runtime.market.symbol) {
         const candles = await marketClient.loadHistory(currentSymbol, '1m');
