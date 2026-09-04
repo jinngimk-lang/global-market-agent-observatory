@@ -1,0 +1,191 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Literal, Protocol
+
+import httpx
+from fastapi import APIRouter, HTTPException, Query, status
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.api.intelligence import build_intelligence_router
+from app.domain.models import Candle
+from app.market.alpaca_history import AlpacaHistoricalBarsClient, HistoricalBarsResult
+from app.market.levels import SupportResistanceLevels, derive_support_resistance
+from app.settings import Settings
+
+HistoricalTimeframe = Literal["1Min", "1Day", "1Week", "1Month"]
+
+
+class HistoricalBarsProvider(Protocol):
+    async def fetch(
+        self,
+        symbol: str,
+        *,
+        timeframe: str,
+        limit: int = 240,
+    ) -> HistoricalBarsResult: ...
+
+
+class MarketHistoryResponse(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str
+    timeframe: HistoricalTimeframe
+    source: str
+    feed: str
+    coverage: str
+    generated_at: datetime
+    candles: list[Candle] = Field(default_factory=list)
+    levels: SupportResistanceLevels
+
+
+def _local_minute_history(
+    *,
+    runtime: object,
+    symbol: str,
+    limit: int,
+) -> MarketHistoryResponse | None:
+    store = getattr(runtime, "store", None)
+    if store is None:
+        return None
+    candles = store.list_candles(symbol, interval="1m", limit=limit)
+    if not candles:
+        return None
+    return MarketHistoryResponse(
+        symbol=symbol,
+        timeframe="1Min",
+        source="runtime-store",
+        feed="runtime",
+        coverage="runtime-feed",
+        generated_at=datetime.now(UTC),
+        candles=candles,
+        levels=derive_support_resistance(
+            candles,
+            pivot_width=2,
+            lookback=min(limit, 120),
+        ),
+    )
+
+
+def _unconfigured_history_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={
+            "code": "historical_market_data_unconfigured",
+            "message": (
+                "Verified historical stock data requires Alpaca market-data "
+                "credentials; minute history can fall back only when verified "
+                "local candles exist."
+            ),
+        },
+    )
+
+
+def build_market_history_router(*, settings: Settings, runtime: object) -> APIRouter:
+    """Compose the read-only dashboard market/context data routes.
+
+    The application already includes this router at startup. Keeping the market-history
+    and Context Intelligence routes in this read-only composition avoids adding any
+    control/mutation path and keeps execution authority separate.
+    """
+
+    router = APIRouter(tags=["market-history"])
+    router.include_router(build_intelligence_router(settings=settings, runtime=runtime))
+
+    @router.get("/api/market/history/{symbol}", response_model=MarketHistoryResponse)
+    async def market_history(
+        symbol: str,
+        timeframe: HistoricalTimeframe,
+        limit: int = Query(default=240, ge=5, le=10_000),
+    ) -> MarketHistoryResponse:
+        normalized = symbol.strip().upper()
+        permitted = settings.trading_universe & settings.allowed_symbols
+        if normalized not in permitted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": "symbol_not_configured",
+                    "message": "Symbol is not in the configured equity trading universe.",
+                },
+            )
+
+        injected = hasattr(runtime, "historical_bars")
+        provider = getattr(runtime, "historical_bars", None)
+        owned_provider: AlpacaHistoricalBarsClient | None = None
+        if provider is None and not injected:
+            if settings.alpaca_api_key is None or settings.alpaca_api_secret is None:
+                if timeframe == "1Min":
+                    local = _local_minute_history(
+                        runtime=runtime,
+                        symbol=normalized,
+                        limit=limit,
+                    )
+                    if local is not None:
+                        return local
+                raise _unconfigured_history_error()
+            owned_provider = AlpacaHistoricalBarsClient(
+                api_key=settings.alpaca_api_key.get_secret_value(),
+                api_secret=settings.alpaca_api_secret.get_secret_value(),
+                feed=settings.alpaca_market_data_feed,
+            )
+            provider = owned_provider
+        elif provider is None:
+            if timeframe == "1Min":
+                local = _local_minute_history(
+                    runtime=runtime,
+                    symbol=normalized,
+                    limit=limit,
+                )
+                if local is not None:
+                    return local
+            raise _unconfigured_history_error()
+
+        try:
+            result = await provider.fetch(
+                normalized,
+                timeframe=timeframe,
+                limit=limit,
+            )
+        except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+            if timeframe == "1Min":
+                local = _local_minute_history(
+                    runtime=runtime,
+                    symbol=normalized,
+                    limit=limit,
+                )
+                if local is not None:
+                    return local
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "code": "historical_market_data_failed",
+                    "message": "Verified historical market-data request failed.",
+                },
+            ) from exc
+        finally:
+            if owned_provider is not None:
+                await owned_provider.close()
+
+        levels = derive_support_resistance(
+            result.candles,
+            pivot_width=2,
+            lookback=min(limit, 120),
+        )
+        source = (
+            result.candles[-1].source
+            if result.candles
+            else f"alpaca:{result.feed}:historical"
+        )
+        generated_at = datetime.now(UTC)
+        return MarketHistoryResponse(
+            symbol=result.symbol,
+            timeframe=timeframe,
+            source=source,
+            feed=result.feed,
+            coverage=result.coverage,
+            generated_at=generated_at,
+            candles=result.candles,
+            levels=levels,
+        )
+
+    return router

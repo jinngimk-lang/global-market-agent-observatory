@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
-from app.domain.models import Candle, EvidenceItem, OrderRecord, Position
+from app.domain.models import AuditEvent, Candle, EvidenceItem, OrderRecord, Position
 from app.research.crisis import CrisisWinner
 
 
@@ -59,6 +59,15 @@ class SQLiteStore:
                     observed_at TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS audit_events (
+                    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_id TEXT NOT NULL UNIQUE,
+                    event_type TEXT NOT NULL,
+                    subject TEXT,
+                    payload TEXT NOT NULL,
+                    occurred_at TEXT NOT NULL
+                );
+
                 CREATE TABLE IF NOT EXISTS account_state (
                     id INTEGER PRIMARY KEY CHECK (id = 1),
                     cash TEXT NOT NULL,
@@ -90,7 +99,6 @@ class SQLiteStore:
                     filled_at TEXT NOT NULL,
                     FOREIGN KEY(order_id) REFERENCES orders(order_id)
                 );
-
 
                 CREATE TABLE IF NOT EXISTS crisis_winners (
                     case_id TEXT PRIMARY KEY,
@@ -193,6 +201,32 @@ class SQLiteStore:
                 "SELECT payload FROM evidence ORDER BY observed_at DESC LIMIT ?", (limit,)
             ).fetchall()
         return [EvidenceItem.model_validate_json(row["payload"]) for row in rows]
+
+    def append_audit_event(self, event: AuditEvent) -> None:
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO audit_events(event_id, event_type, subject, payload, occurred_at)
+                VALUES(?, ?, ?, ?, ?)
+                """,
+                (
+                    event.event_id,
+                    event.event_type.value,
+                    event.subject,
+                    event.model_dump_json(),
+                    event.occurred_at.isoformat(),
+                ),
+            )
+
+    def list_audit_events(self, *, limit: int = 200) -> list[AuditEvent]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT payload FROM audit_events ORDER BY sequence DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        events = [AuditEvent.model_validate_json(row["payload"]) for row in rows]
+        events.reverse()
+        return events
 
     def add_crisis_winner(self, winner: CrisisWinner) -> None:
         with self._connection() as connection:
@@ -352,4 +386,5 @@ class SQLiteStore:
             "positions": [position.model_dump(mode="json") for position in self.list_positions()],
             "orders": [json.loads(order.model_dump_json()) for order in self.list_orders()],
             "evidence_count": len(self.list_evidence(limit=100000)),
+            "audit_event_count": len(self.list_audit_events(limit=100000)),
         }

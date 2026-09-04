@@ -7,6 +7,25 @@ from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 
+class TradingMode(StrEnum):
+    REPLAY = "replay"
+    PAPER = "paper"
+    BROKER_PAPER = "broker-paper"
+    LIVE = "live"
+
+
+class ExecutionProvider(StrEnum):
+    PAPER = "paper"
+    ALPACA = "alpaca"
+    IBKR = "ibkr"
+
+
+class TradingState(StrEnum):
+    ACTIVE = "active"
+    REDUCING = "reducing"
+    HALTED = "halted"
+
+
 class Side(StrEnum):
     BUY = "buy"
     SELL = "sell"
@@ -21,6 +40,17 @@ class OrderStatus(StrEnum):
     ACCEPTED = "accepted"
     FILLED = "filled"
     REJECTED = "rejected"
+    CANCELLED = "cancelled"
+    UNKNOWN = "unknown"
+
+
+class AuditEventType(StrEnum):
+    STRATEGY_SIGNAL = "strategy_signal"
+    RISK_DECISION = "risk_decision"
+    EXECUTION = "execution"
+    RECONCILIATION = "reconciliation"
+    KILL_SWITCH = "kill_switch"
+    SYSTEM = "system"
 
 
 class EvidenceGrade(StrEnum):
@@ -115,13 +145,26 @@ class PortfolioSnapshot(BaseModel):
         return self.cash + market_value
 
 
+class RiskContext(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    trading_state: TradingState = TradingState.ACTIVE
+    market_data_age_seconds: float = 0.0
+    account_state_age_seconds: float = 0.0
+    portfolio_drawdown: Decimal = Decimal("0")
+
+
 class RiskLimits(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     allowed_symbols: set[str] = Field(default_factory=lambda: {"BTCUSDT", "ETHUSDT"})
     max_order_notional: Decimal = Decimal("10000")
+    max_symbol_exposure: Decimal = Decimal("25000")
     max_gross_exposure: Decimal = Decimal("50000")
     daily_loss_limit: Decimal = Decimal("2000")
+    max_portfolio_drawdown: Decimal = Decimal("5000")
+    market_data_max_age_seconds: float = 5.0
+    account_state_max_age_seconds: float = 30.0
 
     @field_validator("allowed_symbols")
     @classmethod
@@ -148,6 +191,16 @@ class OrderRecord(BaseModel):
     message: str = ""
     filled_price: Decimal | None = None
     filled_at: datetime | None = None
+
+
+class AuditEvent(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    event_id: str
+    event_type: AuditEventType
+    subject: str | None = None
+    payload: dict[str, object] = Field(default_factory=dict)
+    occurred_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class EvidenceItem(BaseModel):
@@ -207,8 +260,13 @@ class ExternalAccountSnapshot(BaseModel):
     status: str = "connected"
     base_currency: str | None = None
     equity: Decimal | None = None
+    prior_equity: Decimal | None = None
+    daily_pnl: Decimal | None = None
     cash: Decimal | None = None
     buying_power: Decimal | None = None
+    trading_blocked: bool | None = None
+    account_blocked: bool | None = None
+    trade_suspended_by_user: bool | None = None
     balances: list[ObservedBalance] = Field(default_factory=list)
     positions: list[ObservedPosition] = Field(default_factory=list)
     orders: list[ObservedOrder] = Field(default_factory=list)

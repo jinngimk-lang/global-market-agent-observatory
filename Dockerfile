@@ -11,7 +11,7 @@ WORKDIR /app
 
 COPY pyproject.toml README.md ./
 COPY app ./app
-RUN python -m pip install --upgrade pip && python -m pip install .
+RUN python -m pip install --upgrade pip && python -m pip install --only-binary=:all: .
 
 COPY . .
 RUN mkdir -p /app/data && chown -R observatory:observatory /app

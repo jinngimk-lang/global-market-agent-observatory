@@ -11,6 +11,18 @@
     return value * 60 * 1000;
   }
 
+  function candleTimestamp(candle) {
+    const value = Date.parse(candle?.open_time || '');
+    return Number.isFinite(value) ? value : null;
+  }
+
+  function isOutOfOrderCandle(candle, latestTimestamp) {
+    const timestamp = candleTimestamp(candle);
+    return timestamp !== null
+      && Number.isFinite(latestTimestamp)
+      && timestamp < latestTimestamp;
+  }
+
   function seededRandom(seedText) {
     let state = 2166136261;
     for (const character of seedText) {
@@ -119,15 +131,20 @@
     const symbol = runtime.market.symbol;
     const interval = runtime.market.interval;
 
-    async function loadHistory() {
+    async function loadHistory(requestedSymbol = symbol, requestedInterval = interval) {
+      const targetSymbol = String(requestedSymbol || symbol).trim().toUpperCase();
+      const targetInterval = String(requestedInterval || interval).trim() || interval;
+
       if (runtime.mode === 'backend') {
         const response = await fetch(
-          `${runtime.apiBase}/api/candles/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(interval)}&limit=500`,
+          `${runtime.apiBase}/api/candles/${encodeURIComponent(targetSymbol)}?interval=${encodeURIComponent(targetInterval)}&limit=500`,
           {credentials: 'same-origin'},
         );
         if (!response.ok) throw new Error(`backend history failed: ${response.status}`);
         return response.json();
       }
+
+      if (targetSymbol !== symbol || targetInterval !== interval) return [];
 
       try {
         const query = new URLSearchParams({symbol, interval, limit: '500'});
@@ -153,11 +170,31 @@
       let attempts = 0;
       let replayHistory = fallbackHistory(symbol, interval, 2);
       let replaySequence = 0;
+      const latestStreamTimes = new Map();
 
       function stopReplay() {
         if (replayTimer !== null) {
           global.clearInterval(replayTimer);
           replayTimer = null;
+        }
+      }
+
+      function deliverCandle(candle) {
+        const key = `${String(candle.symbol || '').toUpperCase()}:${candle.interval || interval}`;
+        const latestTimestamp = latestStreamTimes.get(key);
+        if (isOutOfOrderCandle(candle, latestTimestamp)) {
+          onStatus({state: 'degraded', label: 'OUT-OF-ORDER IGNORED'});
+          return;
+        }
+        const timestamp = candleTimestamp(candle);
+        if (timestamp !== null) latestStreamTimes.set(key, timestamp);
+
+        try {
+          if (runtime.mode === 'backend') onCandle(candle);
+          else if (candle.symbol === symbol) onCandle(candle);
+        } catch (error) {
+          console.error('market render callback failed', error);
+          onStatus({state: 'degraded', label: 'RENDER ERROR'});
         }
       }
 
@@ -169,7 +206,7 @@
           replaySequence += 1;
           const next = nextFallbackCandle(previous, replaySequence);
           replayHistory = [previous, next];
-          onCandle(next);
+          deliverCandle(next);
         }, Math.max(1000, intervalMilliseconds(interval) / 60));
       }
 
@@ -203,15 +240,18 @@
           onStatus({state: 'streaming', label: runtime.mode === 'static' ? 'PUBLIC STREAM' : 'STREAMING'});
         });
         socket.addEventListener('message', (event) => {
+          let candle = null;
           try {
             const payload = JSON.parse(event.data);
-            const candle = runtime.mode === 'backend'
-              ? (payload.type === 'candle' ? payload.data : null)
-              : (payload.k ? normalizeBinanceStream(symbol, interval, payload) : null);
-            if (candle && candle.symbol === symbol) onCandle(candle);
-          } catch (_) {
+            candle = runtime.mode === 'backend'
+              ? (payload && payload.type === 'candle' ? payload.data : null)
+              : (payload && payload.k ? normalizeBinanceStream(symbol, interval, payload) : null);
+          } catch (error) {
+            console.error('invalid market stream payload', error);
             onStatus({state: 'degraded', label: 'INVALID STREAM DATA'});
+            return;
           }
+          if (candle) deliverCandle(candle);
         });
         socket.addEventListener('error', () => {
           onStatus({state: 'degraded', label: 'STREAM ERROR'});
@@ -231,5 +271,10 @@
     return Object.freeze({loadHistory, connect});
   }
 
-  global.ObservatoryMarketClient = Object.freeze({create, fallbackHistory, nextFallbackCandle});
+  global.ObservatoryMarketClient = Object.freeze({
+    create,
+    fallbackHistory,
+    nextFallbackCandle,
+    isOutOfOrderCandle,
+  });
 }(window));

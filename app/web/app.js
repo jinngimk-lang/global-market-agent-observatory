@@ -8,29 +8,192 @@ const state = {
   series: null,
   symbol: runtime.market.symbol,
   interval: runtime.market.interval,
-  markers: [],
   disconnectMarket: null,
+  tradingStatus: null,
+  marketStructure: {generated_at: null, symbols: {}},
+  marketCoverage: {generated_at: null, fresh_coverage_ratio: 0, symbols: {}},
+  portfolio: null,
+  orders: [],
+  audit: [],
 };
 
-const money = (value) => Number(value || 0).toLocaleString('en-US', {maximumFractionDigits: 2});
-const number = (value, digits = 6) => Number(value || 0).toLocaleString('en-US', {maximumFractionDigits: digits});
-const text = (value) => value ?? '—';
+const money = (value) => value == null || value === ''
+  ? '—'
+  : Number(value).toLocaleString('en-US', {maximumFractionDigits: 2});
+const number = (value, digits = 4) => value == null || value === ''
+  ? '—'
+  : Number(value).toLocaleString('en-US', {maximumFractionDigits: digits});
+const percent = (value, digits = 2) => value == null || value === ''
+  ? '—'
+  : `${(Number(value) * 100).toFixed(digits)}%`;
 const apiUrl = (path) => `${runtime.apiBase}${path}`;
+
+const reasonLabels = {
+  insufficient_structure: '缺少可验证的期权结构',
+  missing_order_flow: '缺少主动买卖方向确认',
+  no_gamma_level_trigger: '未触发 Put/Call Wall 条件',
+  call_wall_breakout: '突破 Call Wall',
+  positive_order_flow: '订单流偏多',
+  put_wall_breakdown: '跌破 Put Wall',
+  negative_order_flow: '订单流偏空',
+  put_wall_support: 'Put Wall 附近获得支撑',
+  call_wall_rejection: 'Call Wall 附近受阻',
+  vwap_reclaim: '重新站上 VWAP',
+  vwap_rejection: 'VWAP 附近受阻',
+  no_vwap_trigger: '未触发 VWAP 状态穿越',
+  insufficient_history: '历史数据不足',
+};
+
+const observeStatus = () => ({
+  trading_mode: 'observe',
+  execution_provider: 'none',
+  auto_trading_enabled: false,
+  promotion_execution_allowed: false,
+  autonomous_execution_enabled: false,
+  trading_state: 'active',
+  market_source: 'static',
+  market_symbol: runtime.market.symbol,
+  trading_universe: [runtime.market.symbol],
+  last_cycles: {},
+  strategy_promotion: [],
+  continuous_improvement: {
+    health_execution_allowed: true,
+    strategy_health: [],
+  },
+  runtime_loops: {},
+});
+
+const observeMarketStructure = () => ({
+  generated_at: null,
+  symbols: {
+    [runtime.market.symbol]: {
+      status: 'missing',
+      symbol: runtime.market.symbol,
+      market_source: null,
+      latest_price: null,
+      observed_at: null,
+      market_data_stale: true,
+      options_structure_stale: true,
+      availability: {
+        vwap: false,
+        order_flow_imbalance: false,
+        options_structure: false,
+      },
+      structure: null,
+      provenance: {},
+    },
+  },
+});
+
+const observeMarketCoverage = () => ({
+  generated_at: null,
+  market_source: 'static',
+  interval: runtime.market.interval,
+  fresh_symbols: [],
+  stale_symbols: [],
+  missing_symbols: [runtime.market.symbol],
+  fresh_coverage_ratio: 0,
+  symbols: {
+    [runtime.market.symbol]: {
+      status: 'missing',
+      source: null,
+      latest_price: null,
+      open_time: null,
+      close_time: null,
+      age_seconds: null,
+      cycle_status: 'waiting',
+      cycle_error: null,
+    },
+  },
+});
+
+const observePortfolio = () => ({
+  equity: 0,
+  cash: 0,
+  gross_exposure: 0,
+  realized_pnl_today: 0,
+  mode: 'observe',
+  positions: [],
+});
+
+function setText(id, value) {
+  const node = document.getElementById(id);
+  if (node) node.textContent = value;
+}
+
+async function fetchBackendHistory(symbol) {
+  if (runtime.mode !== 'backend') return [];
+  try {
+    const response = await fetch(
+      apiUrl(`/api/candles/${encodeURIComponent(symbol)}?interval=${encodeURIComponent(state.interval)}&limit=300`),
+      {credentials: 'same-origin', cache: 'no-store'},
+    );
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    return response.json();
+  } catch (error) {
+    console.error('failed to fetch candle history', error);
+    return [];
+  }
+}
+
+async function readBackendSnapshot() {
+  if (runtime.mode !== 'backend' || !backendActions) {
+    return [
+      observeStatus(),
+      observeMarketStructure(),
+      observeMarketCoverage(),
+      observePortfolio(),
+      [],
+      [],
+    ];
+  }
+  try {
+    return await Promise.all([
+      backendActions.loadTradingStatus(),
+      backendActions.loadMarketStructure(),
+      backendActions.loadMarketCoverage(),
+      backendActions.loadPortfolio(),
+      backendActions.loadOrders(50),
+      backendActions.loadAudit(80),
+    ]);
+  } catch (error) {
+    console.error('failed to refresh trading dashboard', error);
+    return [
+      state.tradingStatus || observeStatus(),
+      state.marketStructure || observeMarketStructure(),
+      state.marketCoverage || observeMarketCoverage(),
+      state.portfolio || observePortfolio(),
+      state.orders || [],
+      state.audit || [],
+    ];
+  }
+}
 
 function initChart() {
   const container = document.getElementById('chart');
+  if (!window.LightweightCharts) {
+    container.textContent = '图表组件未加载，但交易状态与决策数据仍可查看。';
+    container.classList.add('chart-fallback');
+    return;
+  }
   state.chart = LightweightCharts.createChart(container, {
-    layout: {background: {color: 'transparent'}, textColor: '#8e9bb1'},
-    grid: {vertLines: {color: 'rgba(160,180,215,.06)'}, horzLines: {color: 'rgba(160,180,215,.06)'}},
-    rightPriceScale: {borderColor: 'rgba(160,180,215,.12)'},
-    timeScale: {borderColor: 'rgba(160,180,215,.12)', timeVisible: true, secondsVisible: false},
+    layout: {background: {color: 'transparent'}, textColor: '#8795aa'},
+    grid: {
+      vertLines: {color: 'rgba(145, 164, 196, .06)'},
+      horzLines: {color: 'rgba(145, 164, 196, .06)'},
+    },
+    rightPriceScale: {borderColor: 'rgba(145, 164, 196, .12)'},
+    timeScale: {borderColor: 'rgba(145, 164, 196, .12)', timeVisible: true},
     crosshair: {mode: LightweightCharts.CrosshairMode.Normal},
   });
   state.series = state.chart.addCandlestickSeries({
-    upColor: '#50e3a4', downColor: '#ff6b7a', borderVisible: false,
-    wickUpColor: '#50e3a4', wickDownColor: '#ff6b7a',
+    upColor: '#46d99a', downColor: '#ff6474', borderVisible: false,
+    wickUpColor: '#46d99a', wickDownColor: '#ff6474',
   });
-  const resize = () => state.chart.applyOptions({width: container.clientWidth, height: container.clientHeight});
+  const resize = () => state.chart.applyOptions({
+    width: container.clientWidth,
+    height: container.clientHeight,
+  });
   new ResizeObserver(resize).observe(container);
   resize();
 }
@@ -45,10 +208,24 @@ function candlePoint(item) {
   };
 }
 
-function updateMarketDisplay(candle) {
-  state.series.update(candlePoint(candle));
-  document.getElementById('last-price').textContent = money(candle.close);
-  document.getElementById('feed-source').textContent = `${candle.source} · ${candle.interval}`;
+async function loadHistory() {
+  if (!state.series) return;
+  let candles = [];
+  if (runtime.mode === 'backend') {
+    candles = await fetchBackendHistory(state.symbol);
+  } else if (state.symbol === runtime.market.symbol) {
+    candles = await marketClient.loadHistory();
+  }
+  state.series.setData(candles.map(candlePoint));
+  if (candles.length) {
+    const last = candles[candles.length - 1];
+    setText('last-price', money(last.close));
+    setText('feed-source', `${last.source} · ${last.interval}`);
+  } else {
+    setText('last-price', '—');
+    setText('feed-source', '该标的暂无K线');
+  }
+  setText('symbol-title', `${state.symbol} · ${state.interval}`);
 }
 
 function updateConnection(status) {
@@ -57,13 +234,11 @@ function updateConnection(status) {
   badge.className = status.state === 'streaming' ? 'badge safe' : 'badge danger';
 }
 
-async function loadHistory() {
-  const candles = await marketClient.loadHistory();
-  if (candles.length) {
-    state.series.setData(candles.map(candlePoint));
-    const last = candles[candles.length - 1];
-    document.getElementById('last-price').textContent = money(last.close);
-    document.getElementById('feed-source').textContent = `${last.source} · ${last.interval}`;
+function updateMarketDisplay(candle) {
+  if (candle.symbol === state.symbol && state.series) {
+    state.series.update(candlePoint(candle));
+    setText('last-price', money(candle.close));
+    setText('feed-source', `${candle.source} · ${candle.interval}`);
   }
 }
 
@@ -71,276 +246,632 @@ function connectMarket() {
   state.disconnectMarket = marketClient.connect(updateMarketDisplay, updateConnection);
 }
 
-async function loadHealth() {
-  const modeBadge = document.getElementById('mode-badge');
-  const capabilityBadge = document.getElementById('capability-badge');
-  document.getElementById('symbol-title').textContent = `${state.symbol} · ${state.interval}`;
+function toneForAction(action) {
+  if (action === 'buy') return 'safe';
+  if (action === 'exit' || action === 'reduce') return 'danger';
+  return 'muted';
+}
 
-  if (runtime.observeOnly) {
-    modeBadge.textContent = 'OBSERVE ONLY';
-    modeBadge.className = 'badge safe';
-    capabilityBadge.textContent = 'PUBLIC DATA';
-    capabilityBadge.className = 'badge muted';
+function aggregateAction(signals) {
+  const actions = signals.map((signal) => signal.action);
+  if (actions.includes('exit')) return 'exit';
+  if (actions.includes('reduce')) return 'reduce';
+  if (actions.includes('buy')) return 'buy';
+  return 'hold';
+}
+
+function explainRationales(codes) {
+  if (!codes?.length) return '没有策略理由';
+  return codes.map((code) => reasonLabels[code] || code).join(' · ');
+}
+
+function positionFor(symbol) {
+  return state.portfolio?.positions?.find((position) => position.symbol === symbol) || null;
+}
+
+function actionableSignal(signals) {
+  return signals.find((signal) => signal.action !== 'hold') || signals[0] || null;
+}
+
+function structureStatusFor(symbol) {
+  return state.marketStructure?.symbols?.[symbol] || null;
+}
+
+function coverageStatusFor(symbol) {
+  return state.marketCoverage?.symbols?.[symbol] || null;
+}
+
+function observedValue(value, digits = 4) {
+  if (value == null || value === '') return '未观测';
+  return number(value, digits);
+}
+
+function observedPrice(value) {
+  if (value == null || value === '') return '未观测';
+  return `$${money(value)}`;
+}
+
+function structureFreshness(item) {
+  if (!item || item.status !== 'observed') return '未观测';
+  if (item.market_data_stale) return 'MARKET STALE';
+  if (item.availability?.options_structure && item.options_structure_stale) {
+    return 'OPTIONS STALE';
+  }
+  return 'FRESH';
+}
+
+function feedCoverageLabel(item) {
+  if (!item || item.status === 'missing') return 'FEED MISSING';
+  if (item.status === 'stale') return 'FEED STALE';
+  return 'FEED FRESH';
+}
+
+function cycleCoverageLabel(item) {
+  if (!item) return 'WAITING';
+  if (item.cycle_status === 'error') return 'CYCLE ERROR';
+  return String(item.cycle_status || 'waiting').toUpperCase();
+}
+
+function appendCoverageWarnings(card, coverage) {
+  const feedLabel = feedCoverageLabel(coverage);
+  if (feedLabel === 'FEED MISSING') {
+    const warning = document.createElement('div');
+    warning.className = 'truth-warning';
+    warning.textContent = 'FEED MISSING：该标的尚未收到任何 candle；页面不会把其他标的行情冒充为它的实时数据。';
+    card.appendChild(warning);
+  } else if (feedLabel === 'FEED STALE') {
+    const warning = document.createElement('div');
+    warning.className = 'truth-warning';
+    warning.textContent = `FEED STALE：最后 candle 已超过风险 freshness threshold${coverage?.age_seconds != null ? `（约 ${number(coverage.age_seconds, 1)}s）` : ''}；这不自动等同于数据源故障。`;
+    card.appendChild(warning);
+  }
+
+  if (coverage?.cycle_status === 'error') {
+    const warning = document.createElement('div');
+    warning.className = 'truth-warning';
+    warning.textContent = `CYCLE ERROR：行情已经进入系统，但策略/组合处理失败。${coverage.cycle_error ? ` ${coverage.cycle_error}` : ''}`;
+    card.appendChild(warning);
+  }
+}
+
+function appendMarketStructureFacts(card, symbol) {
+  const item = structureStatusFor(symbol);
+  const coverage = coverageStatusFor(symbol);
+  const structure = item?.structure || null;
+  const facts = document.createElement('div');
+  facts.className = 'decision-facts structure-facts';
+  const values = [
+    ['Feed覆盖', feedCoverageLabel(coverage)],
+    ['Cycle处理', cycleCoverageLabel(coverage)],
+    ['VWAP', observedPrice(structure?.vwap)],
+    ['OFI', observedValue(structure?.order_flow_imbalance, 4)],
+    ['Put Wall 估算', observedPrice(structure?.put_wall)],
+    ['Call Wall 估算', observedPrice(structure?.call_wall)],
+    ['Net GEX Proxy', observedValue(structure?.net_gex_1pct, 0)],
+    ['结构新鲜度', structureFreshness(item)],
+  ];
+  for (const [label, value] of values) {
+    const fact = document.createElement('div');
+    const labelNode = document.createElement('span');
+    labelNode.textContent = label;
+    const valueNode = document.createElement('strong');
+    valueNode.textContent = value;
+    fact.append(labelNode, valueNode);
+    facts.appendChild(fact);
+  }
+  card.appendChild(facts);
+
+  appendCoverageWarnings(card, coverage);
+
+  if (!item || item.status !== 'observed') {
+    const warning = document.createElement('div');
+    warning.className = 'truth-warning';
+    warning.textContent = '该标的市场结构尚未观测；不会把缺失值显示成 0。';
+    card.appendChild(warning);
     return;
   }
 
-  const health = await fetch(apiUrl('/api/health')).then((response) => response.json());
-  modeBadge.textContent = health.trading_mode.toUpperCase();
-  capabilityBadge.textContent = 'PRIVATE BACKEND';
-  state.symbol = health.market_symbol;
-  document.getElementById('symbol-title').textContent = `${health.market_symbol} · ${state.interval}`;
+  const provenance = item.provenance || {};
+  const source = document.createElement('div');
+  source.className = 'source-context';
+  const optionsSource = provenance.options_provider
+    ? ` · Options ${provenance.options_provider}${provenance.options_feed ? `/${provenance.options_feed}` : ''}`
+    : '';
+  const feedSource = coverage?.source ? ` · candle ${coverage.source}` : '';
+  source.textContent = `结构来源：${item.market_source || provenance.market_source || '—'}${feedSource}${optionsSource} · observed ${item.observed_at || '—'}`;
+  card.appendChild(source);
+
+  const freshness = structureFreshness(item);
+  if (freshness !== 'FRESH') {
+    const warning = document.createElement('div');
+    warning.className = 'truth-warning';
+    warning.textContent = freshness === 'MARKET STALE'
+      ? '行情结构已过期；当前数值仅保留为历史观察，不应视为新的交易依据。'
+      : '期权结构已过期；Wall / GEX Proxy 仅保留为历史观察。';
+    card.appendChild(warning);
+  }
 }
 
-function demoData(key, fallback) {
-  const source = window.OBSERVATORY_DEMO_DATA || {};
-  return source[key] ?? fallback;
+function renderSystemSummary(status) {
+  const summary = document.getElementById('system-summary');
+  summary.replaceChildren();
+
+  let headline = '自动交易尚未满足执行条件';
+  let detail = '系统会继续观察并记录策略信号。';
+  let tone = 'neutral';
+
+  if (status.trading_state === 'halted') {
+    headline = '风险已锁定：HALTED';
+    detail = '行情和学习 loop 可以继续运行，但不会因为数据恢复而自动重新放开风险。';
+    tone = 'danger';
+  } else if (status.trading_state === 'reducing') {
+    headline = '系统处于 REDUCING';
+    detail = '策略健康或运行异常触发了风险收缩；不会自动恢复 ACTIVE。';
+    tone = 'warning';
+  } else if (!status.auto_trading_enabled) {
+    headline = '当前只监控，不自动下单';
+    detail = 'AUTO_TRADING_ENABLED=false；策略仍会计算并留下决策证据。';
+  } else if (!status.promotion_execution_allowed) {
+    headline = '策略晋级门正在阻止自动执行';
+    detail = '券商执行能力和策略资金权限是两个独立 Gate；当前策略证据还不够。';
+    tone = 'warning';
+  } else if (!status.continuous_improvement?.health_execution_allowed) {
+    headline = '策略健康门已阻止继续增加风险';
+    detail = '持续评估发现策略健康不满足当前门槛。';
+    tone = 'danger';
+  } else if (status.autonomous_execution_enabled) {
+    headline = '自动交易执行链已开启';
+    detail = '每个订单仍必须依次通过 Strategy → Portfolio → Risk → Execution。';
+    tone = 'safe';
+  }
+
+  const title = document.createElement('strong');
+  title.className = `system-headline ${tone}`;
+  title.textContent = headline;
+  const body = document.createElement('p');
+  body.textContent = detail;
+  summary.append(title, body);
+
+  const universe = status.trading_universe || [];
+  const sourceContext = document.createElement('div');
+  sourceContext.className = 'source-context';
+  const targetText = universe.length ? universe.join(' / ') : '未配置';
+  const freshCount = state.marketCoverage?.fresh_symbols?.length || 0;
+  sourceContext.textContent = `行情源：${String(status.market_source || '—').toUpperCase()} · 当前feed标的：${status.market_symbol || '—'} · 交易Universe：${targetText} · Fresh覆盖：${freshCount}/${universe.length || 0}`;
+  summary.appendChild(sourceContext);
+
+  if (
+    status.market_source === 'replay'
+    && universe.length
+    && !universe.includes(status.market_symbol)
+  ) {
+    const warning = document.createElement('div');
+    warning.className = 'truth-warning';
+    warning.textContent = `当前只是 ${status.market_symbol} 的 replay 行情；${targetText} 尚未收到对应实时市场 cycle。页面不会把跳动K线伪装成这些股票正在被自动交易。`;
+    summary.appendChild(warning);
+  }
+
+  if (universe.length && freshCount < universe.length) {
+    const missing = state.marketCoverage?.missing_symbols || [];
+    const stale = state.marketCoverage?.stale_symbols || [];
+    const warning = document.createElement('div');
+    warning.className = 'truth-warning';
+    warning.textContent = `当前 freshness 覆盖不足：${freshCount}/${universe.length}${missing.length ? ` · missing ${missing.join('/')}` : ''}${stale.length ? ` · stale ${stale.join('/')}` : ''}。非交易时段可能自然表现为 stale，不会自动把它判定成 feed 故障。`;
+    summary.appendChild(warning);
+  }
+
+  setText('data-source-label', `${status.execution_provider || '—'} · ${status.market_source || '—'}`);
 }
 
-async function loadPortfolio() {
-  const portfolio = runtime.mode === 'backend'
-    ? await fetch(apiUrl('/api/portfolio')).then((response) => response.json())
-    : demoData('portfolio', {equity: 0, cash: 0, gross_exposure: 0, realized_pnl_today: 0, positions: []});
-  document.getElementById('equity').textContent = money(portfolio.equity);
-  document.getElementById('cash').textContent = money(portfolio.cash);
-  document.getElementById('gross-exposure').textContent = money(portfolio.gross_exposure);
-  const realized = Number(portfolio.realized_pnl_today);
+function renderBadges(status) {
+  const mode = document.getElementById('mode-badge');
+  mode.textContent = `MODE ${String(status.trading_mode || '—').toUpperCase()}`;
+  mode.className = 'badge muted';
+
+  const capability = document.getElementById('capability-badge');
+  capability.textContent = runtime.mode === 'backend' ? 'DECISION BACKEND' : 'OBSERVE ONLY';
+  capability.className = runtime.mode === 'backend' ? 'badge safe' : 'badge muted';
+
+  const trading = document.getElementById('trading-state-badge');
+  trading.textContent = `STATE ${String(status.trading_state || '—').toUpperCase()}`;
+  trading.className = status.trading_state === 'active'
+    ? 'badge safe'
+    : status.trading_state === 'halted' ? 'badge danger' : 'badge warning';
+
+  const execution = document.getElementById('execution-badge');
+  execution.textContent = status.autonomous_execution_enabled ? 'AUTO EXEC ON' : 'AUTO EXEC OFF';
+  execution.className = status.autonomous_execution_enabled ? 'badge safe' : 'badge muted';
+}
+
+function renderDecisionCards(status) {
+  const root = document.getElementById('decision-cards');
+  root.replaceChildren();
+  const universe = status.trading_universe?.length
+    ? status.trading_universe
+    : Object.keys(status.last_cycles || {});
+
+  if (!universe.length) {
+    const empty = document.createElement('article');
+    empty.className = 'decision-card placeholder';
+    empty.textContent = '没有配置交易标的。';
+    root.appendChild(empty);
+    return;
+  }
+
+  for (const symbol of universe) {
+    const cycle = status.last_cycles?.[symbol];
+    const structureStatus = structureStatusFor(symbol);
+    const coverageStatus = coverageStatusFor(symbol);
+    const signals = cycle?.signals || [];
+    const action = aggregateAction(signals);
+    const primary = actionableSignal(signals);
+    const position = positionFor(symbol);
+    const card = document.createElement('article');
+    card.className = `decision-card action-${action}`;
+
+    const header = document.createElement('div');
+    header.className = 'decision-card-header';
+    const symbolBlock = document.createElement('div');
+    const symbolName = document.createElement('strong');
+    symbolName.className = 'symbol-name';
+    symbolName.textContent = symbol;
+    const price = document.createElement('span');
+    price.textContent = position
+      ? `$${money(position.market_price)}`
+      : coverageStatus?.latest_price != null
+        ? `$${money(coverageStatus.latest_price)}`
+        : structureStatus?.latest_price != null
+          ? `$${money(structureStatus.latest_price)}`
+          : primary?.entry_price != null ? `$${money(primary.entry_price)}` : '暂无价格';
+    symbolBlock.append(symbolName, price);
+    const badge = document.createElement('span');
+    badge.className = `decision-action ${toneForAction(action)}`;
+    badge.textContent = action.toUpperCase();
+    header.append(symbolBlock, badge);
+    card.appendChild(header);
+
+    appendMarketStructureFacts(card, symbol);
+
+    if (!cycle) {
+      const empty = document.createElement('p');
+      empty.className = 'decision-explanation warning-text';
+      empty.textContent = '尚无该标的 market cycle。当前页面不会猜测 BUY/SELL。';
+      card.appendChild(empty);
+      root.appendChild(card);
+      continue;
+    }
+
+    const strategyList = document.createElement('div');
+    strategyList.className = 'strategy-list';
+    if (!signals.length) {
+      const row = document.createElement('div');
+      row.className = 'strategy-row';
+      row.textContent = '没有策略输出';
+      strategyList.appendChild(row);
+    }
+    for (const signal of signals) {
+      const row = document.createElement('div');
+      row.className = 'strategy-row';
+      const top = document.createElement('div');
+      const name = document.createElement('strong');
+      name.textContent = `${signal.strategy_id}@${signal.version}`;
+      const stateNode = document.createElement('span');
+      stateNode.className = `mini-action ${toneForAction(signal.action)}`;
+      stateNode.textContent = `${signal.action.toUpperCase()} · ${percent(signal.confidence)}`;
+      top.append(name, stateNode);
+      const rationale = document.createElement('p');
+      rationale.textContent = explainRationales(signal.rationale_codes);
+      row.append(top, rationale);
+      strategyList.appendChild(row);
+    }
+    card.appendChild(strategyList);
+
+    const facts = document.createElement('div');
+    facts.className = 'decision-facts';
+    const allocation = cycle.allocations?.find((item) => item.intent) || cycle.allocations?.[0];
+    const execution = cycle.executions?.[cycle.executions.length - 1];
+    const pnl = position
+      ? Number(position.quantity) * (Number(position.market_price) - Number(position.average_price))
+      : null;
+    const factItems = [
+      ['持仓', position ? `${number(position.quantity)} @ ${money(position.average_price)}` : '无'],
+      ['失效价', primary?.invalidation_price != null ? money(primary.invalidation_price) : '—'],
+      ['组合分配', allocation ? `${allocation.code}${allocation.requested_notional != null ? ` · $${money(allocation.requested_notional)}` : ''}` : '无订单意图'],
+      ['执行结果', execution ? `${String(execution.status).toUpperCase()} · ${execution.code || '—'}` : '未送单'],
+      ['浮盈亏', pnl == null ? '—' : `${pnl >= 0 ? '+' : ''}${money(pnl)}`],
+    ];
+    for (const [label, value] of factItems) {
+      const item = document.createElement('div');
+      const labelNode = document.createElement('span');
+      labelNode.textContent = label;
+      const valueNode = document.createElement('strong');
+      valueNode.textContent = value;
+      item.append(labelNode, valueNode);
+      facts.appendChild(item);
+    }
+    card.appendChild(facts);
+
+    const explanation = document.createElement('p');
+    explanation.className = 'decision-explanation';
+    if (cycle.skipped_reason) {
+      explanation.textContent = `本周期跳过：${cycle.skipped_reason}`;
+    } else if (signals.every((signal) => signal.action === 'hold')) {
+      explanation.textContent = '策略已经评估，但当前没有满足可执行条件，所以 HOLD。';
+    } else if (allocation && !allocation.intent) {
+      explanation.textContent = `出现策略触发，但组合层未生成订单：${allocation.message || allocation.code}`;
+    } else if (!status.autonomous_execution_enabled) {
+      explanation.textContent = '出现策略/分配结果，但自动执行 Gate 当前关闭，因此不会送往券商。';
+    } else if (execution) {
+      explanation.textContent = `订单已经进入执行链：${execution.message || execution.code || execution.status}`;
+    } else {
+      explanation.textContent = '策略输出已记录，等待组合/风控/执行链下一步结果。';
+    }
+    card.appendChild(explanation);
+
+    card.addEventListener('click', async () => {
+      state.symbol = symbol;
+      await loadHistory();
+    });
+    root.appendChild(card);
+  }
+}
+
+function summarizeAudit(event) {
+  const payload = event.payload || {};
+  switch (event.event_type) {
+    case 'strategy_signal':
+      return `${payload.strategy_id || 'strategy'} → ${String(payload.action || 'hold').toUpperCase()} · ${explainRationales(payload.rationale_codes || [])}`;
+    case 'risk_decision':
+      return `${payload.allowed ? 'APPROVED' : 'REJECTED'} · ${payload.code || 'risk'} · ${payload.message || ''}`;
+    case 'execution':
+      return `${String(payload.status || 'unknown').toUpperCase()} · ${payload.code || 'execution'} · ${payload.message || ''}`;
+    case 'kill_switch':
+      return `HALT · ${payload.reason || 'kill switch'}`;
+    case 'reconciliation':
+      return `${payload.code || 'reconciliation'} · ${payload.message || ''}`;
+    case 'system':
+      return `${payload.kind || payload.code || 'system'} · ${payload.message || payload.reason || ''}`;
+    default:
+      return JSON.stringify(payload);
+  }
+}
+
+function renderDecisionChain(audit) {
+  const root = document.getElementById('decision-chain');
+  root.replaceChildren();
+  const relevant = audit
+    .filter((event) => ['strategy_signal', 'risk_decision', 'execution', 'kill_switch', 'reconciliation', 'system'].includes(event.event_type))
+    .slice(0, 16);
+  if (!relevant.length) {
+    const empty = document.createElement('p');
+    empty.className = 'empty-state';
+    empty.textContent = '还没有策略 / 风控 / 执行事件。';
+    root.appendChild(empty);
+    return;
+  }
+
+  for (const event of relevant) {
+    const item = document.createElement('article');
+    item.className = `chain-event type-${event.event_type}`;
+    const top = document.createElement('div');
+    const type = document.createElement('strong');
+    type.textContent = event.event_type.replaceAll('_', ' ').toUpperCase();
+    const time = document.createElement('span');
+    time.textContent = new Date(event.occurred_at).toLocaleTimeString();
+    top.append(type, time);
+    const subject = document.createElement('span');
+    subject.className = 'chain-subject';
+    subject.textContent = event.subject || 'runtime';
+    const detail = document.createElement('p');
+    detail.textContent = summarizeAudit(event);
+    item.append(top, subject, detail);
+    root.appendChild(item);
+  }
+}
+
+function renderPortfolio(portfolio) {
+  setText('equity', money(portfolio.equity));
+  setText('cash', money(portfolio.cash));
+  setText('gross-exposure', money(portfolio.gross_exposure));
+  setText('portfolio-mode', String(portfolio.mode || '—').toUpperCase());
+  const realized = Number(portfolio.realized_pnl_today || 0);
   const realizedNode = document.getElementById('realized-pnl');
-  realizedNode.textContent = money(realized);
+  realizedNode.textContent = `${realized >= 0 ? '+' : ''}${money(realized)}`;
   realizedNode.className = realized >= 0 ? 'positive' : 'negative';
+
   const body = document.getElementById('positions-body');
   body.replaceChildren();
-  if (!portfolio.positions.length) {
-    body.innerHTML = `<tr><td colspan="5" class="empty">${runtime.observeOnly ? '静态观察版不读取账户持仓' : '暂无持仓'}</td></tr>`;
+  if (!portfolio.positions?.length) {
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 6;
+    cell.className = 'empty';
+    cell.textContent = '暂无持仓；系统不会为了让页面好看而伪造仓位。';
+    row.appendChild(cell);
+    body.appendChild(row);
     return;
   }
+
   for (const position of portfolio.positions) {
     const pnl = Number(position.quantity) * (Number(position.market_price) - Number(position.average_price));
+    const returnRate = Number(position.average_price)
+      ? (Number(position.market_price) - Number(position.average_price)) / Number(position.average_price)
+      : 0;
     const row = document.createElement('tr');
-    for (const value of [position.symbol, number(position.quantity), money(position.average_price), money(position.market_price)]) {
-      const cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell);
-    }
-    const pnlCell = document.createElement('td'); pnlCell.textContent = money(pnl); pnlCell.className = pnl >= 0 ? 'positive' : 'negative'; row.appendChild(pnlCell);
+    const values = [
+      position.symbol,
+      number(position.quantity),
+      money(position.average_price),
+      money(position.market_price),
+      `${pnl >= 0 ? '+' : ''}${money(pnl)}`,
+      `${returnRate >= 0 ? '+' : ''}${percent(returnRate)}`,
+    ];
+    values.forEach((value, index) => {
+      const cell = document.createElement('td');
+      cell.textContent = value;
+      if (index >= 4) cell.className = pnl >= 0 ? 'positive' : 'negative';
+      row.appendChild(cell);
+    });
     body.appendChild(row);
   }
 }
 
-async function loadOrders() {
-  const orders = runtime.mode === 'backend'
-    ? await backendActions.loadOrders(50)
-    : demoData('orders', []);
-  const body = document.getElementById('orders-body');
+function renderExecutions(orders) {
+  const body = document.getElementById('executions-body');
   body.replaceChildren();
-  state.markers = [];
   if (!orders.length) {
-    body.innerHTML = `<tr><td colspan="6" class="empty">${runtime.observeOnly ? '观察模式不提交订单' : '暂无订单'}</td></tr>`;
-    return;
-  }
-  for (const order of orders) {
     const row = document.createElement('tr');
-    const values = [
-      new Date(order.filled_at || order.intent.requested_at).toLocaleString(),
-      order.intent.side.toUpperCase(), order.intent.symbol, number(order.intent.quantity),
-      money(order.filled_price), order.status.toUpperCase(),
-    ];
-    for (const value of values) { const cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell); }
+    const cell = document.createElement('td');
+    cell.colSpan = 6;
+    cell.className = 'empty';
+    cell.textContent = '暂无订单；请先看上方决策卡确认是“没有信号”还是“Gate 阻止执行”。';
+    row.appendChild(cell);
     body.appendChild(row);
-    if (order.filled_at && order.filled_price) {
-      state.markers.push({
-        time: Math.floor(new Date(order.filled_at).getTime() / 1000),
-        position: order.intent.side === 'buy' ? 'belowBar' : 'aboveBar',
-        color: order.intent.side === 'buy' ? '#50e3a4' : '#ff6b7a',
-        shape: order.intent.side === 'buy' ? 'arrowUp' : 'arrowDown',
-        text: `${order.intent.side.toUpperCase()} ${number(order.intent.quantity)}`,
-      });
-    }
-  }
-  state.markers.sort((a, b) => a.time - b.time);
-  state.series.setMarkers(state.markers);
-}
-
-async function loadExternalAccounts() {
-  const payload = runtime.mode === 'backend'
-    ? await fetch(apiUrl('/api/accounts')).then((response) => response.json())
-    : demoData('accounts', {accounts: []});
-  const body = document.getElementById('external-accounts-body');
-  body.replaceChildren();
-  if (!payload.accounts.length) {
-    body.innerHTML = `<tr><td colspan="6" class="empty">${runtime.observeOnly ? '静态观察版不连接账户' : '未配置只读账户'}</td></tr>`;
     return;
   }
-  for (const account of payload.accounts) {
-    const snapshot = account.snapshot;
+
+  for (const order of orders.slice(0, 30)) {
     const row = document.createElement('tr');
+    const intent = order.intent || {};
+    const timestamp = order.filled_at || intent.requested_at;
     const values = [
-      account.name,
-      snapshot?.mode || 'connecting',
-      account.status,
-      snapshot?.equity == null ? '—' : money(snapshot.equity),
-      snapshot?.positions?.length ?? 0,
-      snapshot?.orders?.length ?? 0,
+      timestamp ? new Date(timestamp).toLocaleString() : '—',
+      intent.symbol || '—',
+      String(intent.side || '—').toUpperCase(),
+      number(intent.quantity),
+      order.filled_price != null ? money(order.filled_price) : money(intent.reference_price),
+      String(order.status || '—').toUpperCase(),
     ];
-    for (const value of values) {
+    values.forEach((value) => {
       const cell = document.createElement('td');
       cell.textContent = value;
       row.appendChild(cell);
-    }
-    if (account.status === 'error') row.title = account.error || 'observer error';
+    });
     body.appendChild(row);
   }
 }
 
-async function loadCrisisWinners() {
-  const winners = runtime.mode === 'backend'
-    ? await fetch(apiUrl('/api/research/crisis-winners?limit=100')).then((response) => response.json())
-    : demoData('crisisWinners', []);
-  const body = document.getElementById('crisis-winners-body');
+function renderStrategyHealth(status) {
+  const body = document.getElementById('strategy-health-body');
   body.replaceChildren();
-  if (!winners.length) {
-    body.innerHTML = '<tr><td colspan="6" class="empty">尚无 A/B 级验证案例</td></tr>';
+  const promotions = status.strategy_promotion || [];
+  const health = status.continuous_improvement?.strategy_health || [];
+  if (!promotions.length && !health.length) {
+    const row = document.createElement('tr');
+    const cell = document.createElement('td');
+    cell.colSpan = 7;
+    cell.className = 'empty';
+    cell.textContent = '暂无策略证据状态。';
+    row.appendChild(cell);
+    body.appendChild(row);
     return;
   }
-  for (const winner of winners) {
+
+  const identities = new Set([
+    ...promotions.map((item) => `${item.strategy_id}@${item.version}`),
+    ...health.map((item) => `${item.strategy_id}@${item.version}`),
+  ]);
+  for (const identity of identities) {
+    const [strategyId, version] = identity.split('@');
+    const promotion = promotions.find((item) => item.strategy_id === strategyId && item.version === version);
+    const report = health.find((item) => item.strategy_id === strategyId && item.version === version);
     const row = document.createElement('tr');
+    const promotionText = promotion
+      ? `${promotion.allowed ? 'ALLOWED' : 'BLOCKED'} · ${promotion.current_stage}→${promotion.required_stage}`
+      : '—';
+    const healthText = report
+      ? report.degraded ? `DEGRADED · ${(report.degradation_reasons || []).join(', ')}` : 'HEALTHY'
+      : '等待样本';
     const values = [
-      winner.case.actor_name,
-      winner.case.actor_type,
-      winner.case.instrument,
-      winner.window.name,
-      money(winner.net_pnl),
-      winner.case.evidence_grade,
+      strategyId,
+      version,
+      promotionText,
+      healthText,
+      report?.closed_observations ?? 0,
+      percent(report?.expectancy_after_costs),
+      percent(report?.max_drawdown),
     ];
-    for (const value of values) {
+    values.forEach((value, index) => {
       const cell = document.createElement('td');
       cell.textContent = value;
+      if (index === 2 && promotion && !promotion.allowed) cell.className = 'warning-text';
+      if (index === 3 && report?.degraded) cell.className = 'negative';
       row.appendChild(cell);
-    }
+    });
     body.appendChild(row);
   }
 }
 
-async function loadPartnerships() {
-  const assessments = runtime.mode === 'backend'
-    ? await fetch(apiUrl('/api/research/partnerships?limit=100')).then((response) => response.json())
-    : demoData('partnerships', []);
-  const body = document.getElementById('partnerships-body');
-  body.replaceChildren();
-  if (!assessments.length) {
-    body.innerHTML = '<tr><td colspan="4" class="empty">等待监管或公司披露</td></tr>';
-    return;
-  }
-  for (const assessment of assessments) {
-    const row = document.createElement('tr');
-    const values = [
-      assessment.entity || '—',
-      assessment.maturity,
-      assessment.confidence,
-      assessment.validation_metrics.join(' · '),
-    ];
-    for (const value of values) {
-      const cell = document.createElement('td');
-      cell.textContent = value;
-      row.appendChild(cell);
-    }
-    body.appendChild(row);
-  }
-}
+function renderRuntimeLoops(status) {
+  const root = document.getElementById('runtime-loops');
+  root.replaceChildren();
+  const loops = status.runtime_loops || {};
+  const labels = {
+    market_feed: 'Market Feed',
+    continuous_improvement: 'Continuous Improvement',
+    options_structure: 'Options Structure',
+    account_observers: 'Account Observers',
+  };
+  for (const [key, label] of Object.entries(labels)) {
+    const loop = loops[key] || {};
+    const card = document.createElement('article');
+    card.className = 'loop-card';
+    const top = document.createElement('div');
+    const name = document.createElement('strong');
+    name.textContent = label;
+    const badge = document.createElement('span');
+    const configured = !(loop.enabled === false || loop.configured === 0 || loop.configured === false);
+    const running = Boolean(loop.running);
+    badge.textContent = !configured ? 'NOT CONFIGURED' : running ? 'RUNNING' : 'STOPPED';
+    badge.className = !configured ? 'mini-status muted' : running ? 'mini-status safe' : 'mini-status danger';
+    top.append(name, badge);
+    card.appendChild(top);
 
-async function loadEvidence() {
-  const evidence = runtime.mode === 'backend'
-    ? await fetch(apiUrl('/api/evidence?limit=100')).then((response) => response.json())
-    : demoData('evidence', []);
-  const body = document.getElementById('evidence-body');
-  body.replaceChildren();
-  if (!evidence.length) {
-    body.innerHTML = '<tr><td colspan="5" class="empty">等待研究数据</td></tr>';
-    return;
-  }
-  for (const item of evidence) {
-    const row = document.createElement('tr');
-    const gradeCell = document.createElement('td');
-    const gradeBadge = document.createElement('span');
-    gradeBadge.className = 'grade';
-    gradeBadge.textContent = text(item.grade);
-    gradeCell.appendChild(gradeBadge);
-    row.appendChild(gradeCell);
-    for (const value of [new Date(item.event_date || item.observed_at).toLocaleDateString(), text(item.entity), item.title, item.tags.join(', ')]) {
-      const cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell);
+    const details = document.createElement('p');
+    const failures = loop.failure_count != null ? `failures ${loop.failure_count}` : '';
+    const error = loop.last_error || (loop.errors && Object.keys(loop.errors).length ? 'observer errors' : '');
+    details.textContent = [failures, error].filter(Boolean).join(' · ') || 'no reported loop error';
+    card.appendChild(details);
+
+    if (loop.symbol_errors && Object.keys(loop.symbol_errors).length) {
+      const errors = document.createElement('small');
+      errors.textContent = Object.entries(loop.symbol_errors)
+        .map(([symbol, message]) => `${symbol}: ${message}`)
+        .join(' | ');
+      card.appendChild(errors);
     }
-    if (item.source_url) row.addEventListener('click', () => window.open(item.source_url, '_blank', 'noopener,noreferrer'));
-    body.appendChild(row);
+    root.appendChild(card);
   }
 }
 
 async function refreshAll() {
-  await Promise.all([loadPortfolio(), loadOrders(), loadEvidence(), loadExternalAccounts(), loadCrisisWinners(), loadPartnerships()]);
-}
+  const [status, marketStructure, marketCoverage, portfolio, orders, audit] = await readBackendSnapshot();
+  state.tradingStatus = status;
+  state.marketStructure = marketStructure;
+  state.marketCoverage = marketCoverage;
+  state.portfolio = portfolio;
+  state.orders = orders;
+  state.audit = audit;
 
-async function submitOrder(event) {
-  event.preventDefault();
-  const message = document.getElementById('order-message');
-  if (!runtime.capabilities.paperOrders) {
-    message.textContent = '静态观察模式已禁用所有订单操作。';
-    message.className = 'message negative';
-    return;
-  }
-  const payload = {
-    client_order_id: document.getElementById('client-order-id').value,
-    symbol: state.symbol,
-    side: document.getElementById('side').value,
-    quantity: document.getElementById('quantity').value,
-  };
-  if (!backendActions) throw new Error('backend actions are unavailable');
-  const result = await backendActions.submitOrder(payload);
-  const data = result.data;
-  if (!result.ok) {
-    message.textContent = `拒绝：${data.detail?.code || 'request_failed'} · ${data.detail?.message || ''}`;
-    message.className = 'message negative';
-    return;
-  }
-  message.textContent = `成交：${data.intent.side.toUpperCase()} ${data.intent.quantity} @ ${data.filled_price}`;
-  message.className = 'message positive';
-  document.getElementById('client-order-id').value = crypto.randomUUID();
-  await refreshAll();
-}
+  renderBadges(status);
+  renderSystemSummary(status);
+  renderPortfolio(portfolio);
+  renderDecisionCards(status);
+  renderDecisionChain(audit);
+  renderExecutions(orders);
+  renderStrategyHealth(status);
+  renderRuntimeLoops(status);
 
-async function refreshResearch() {
-  const button = document.getElementById('research-button');
-  if (!runtime.capabilities.researchRefresh) return;
-  button.disabled = true; button.textContent = '采集中…';
-  try {
-    if (!backendActions) throw new Error('backend actions are unavailable');
-    const result = await backendActions.refreshResearch();
-    button.textContent = `新增 ${result.stored || 0} 条`;
-    await loadEvidence();
-  } catch (_) {
-    button.textContent = '采集失败';
-  } finally {
-    setTimeout(() => { button.disabled = false; button.textContent = '拉取官方更新'; }, 2500);
+  if (!state.symbol || state.symbol === runtime.market.symbol) {
+    state.symbol = status.market_symbol || runtime.market.symbol;
+    setText('symbol-title', `${state.symbol} · ${state.interval}`);
   }
-}
-
-function applyCapabilities() {
-  const orderForm = document.getElementById('order-form');
-  const researchButton = document.getElementById('research-button');
-  const refreshButton = document.getElementById('refresh-button');
-  if (!runtime.capabilities.paperOrders) {
-    for (const control of orderForm.elements) control.disabled = true;
-    document.getElementById('order-message').textContent = 'PUBLIC DATA / OBSERVE ONLY · 不连接账户，不提交订单。';
-  }
-  researchButton.disabled = !runtime.capabilities.researchRefresh;
-  refreshButton.disabled = !runtime.capabilities.accountRefresh;
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
   initChart();
-  document.getElementById('client-order-id').value = crypto.randomUUID();
-  document.getElementById('order-form').addEventListener('submit', submitOrder);
-  document.getElementById('refresh-button').addEventListener('click', refreshAll);
-  document.getElementById('research-button').addEventListener('click', refreshResearch);
-  applyCapabilities();
-  await loadHealth();
-  await loadHistory();
   await refreshAll();
+  await loadHistory();
   connectMarket();
-  if (runtime.mode === 'backend') setInterval(refreshAll, 5000);
+  if (runtime.mode === 'backend') setInterval(refreshAll, 3000);
 });

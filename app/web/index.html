@@ -4,165 +4,266 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
-  <title>Global Market Agent Observatory</title>
+  <title>Autonomous Trading Console</title>
   <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/advanced-market-chart.css">
+  <link rel="stylesheet" href="/static/context-intelligence.css">
   <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
 </head>
 <body>
   <header class="topbar">
     <div>
-      <p class="eyebrow">GLOBAL MARKET AGENT</p>
-      <h1>Observatory</h1>
+      <p class="eyebrow">GLOBAL MARKET AUTONOMOUS TRADING</p>
+      <h1>Trading Console</h1>
+      <p class="subtitle">看清系统看到了什么、为什么交易、为什么不交易。</p>
     </div>
     <div class="status-cluster">
       <span id="connection-badge" class="badge muted">CONNECTING</span>
-      <span id="mode-badge" class="badge safe">PAPER</span>
-      <span id="capability-badge" class="badge muted">BACKEND</span>
-      <span class="badge danger">LIVE DISABLED</span>
+      <span id="mode-badge" class="badge muted">MODE —</span>
+      <span id="capability-badge" class="badge muted">DECISION BACKEND</span>
+      <span id="trading-state-badge" class="badge muted">STATE —</span>
+      <span id="execution-badge" class="badge muted">EXEC —</span>
     </div>
   </header>
 
-  <main class="layout">
-    <section class="panel chart-panel">
+  <main class="console-layout">
+    <section class="panel system-panel">
       <div class="panel-heading">
         <div>
-          <p class="label">实时市场</p>
-          <h2 id="symbol-title">BTCUSDT · 1m</h2>
+          <p class="label">系统结论</p>
+          <h2>现在到底在做什么</h2>
         </div>
-        <div class="price-block">
-          <strong id="last-price">—</strong>
-          <span id="feed-source">waiting for feed</span>
-        </div>
+        <span id="data-source-label" class="microcopy">等待运行状态</span>
       </div>
-      <div id="chart" aria-label="实时K线图"></div>
+      <div id="system-summary" class="system-summary">
+        正在读取交易状态…
+      </div>
     </section>
 
-    <aside class="panel account-panel">
+    <section class="panel symbol-panel">
       <div class="panel-heading">
         <div>
-          <p class="label">账户快照</p>
-          <h2>Paper Account</h2>
+          <p class="label">市场切换</p>
+          <h2>美股 / 行情标的</h2>
         </div>
-        <button id="refresh-button" class="ghost-button" type="button">刷新</button>
+        <span id="market-context-label" class="microcopy">正在读取交易池</span>
       </div>
-      <div class="metric-grid">
+      <div id="symbol-switcher" class="symbol-switcher" aria-label="切换行情标的">
+        <span class="symbol-empty">等待标的列表…</span>
+      </div>
+    </section>
+
+    <section class="panel decisions-panel">
+      <div class="panel-heading">
+        <div>
+          <p class="label">自动决策</p>
+          <h2>标的决策卡</h2>
+        </div>
+        <span class="microcopy">Signal → Allocation → Risk → Execution</span>
+      </div>
+      <div id="decision-cards" class="decision-grid">
+        <article class="decision-card placeholder">等待第一个市场 cycle…</article>
+      </div>
+    </section>
+
+    <section class="panel chart-panel">
+      <div class="panel-heading market-chart-heading">
+        <div class="market-chart-heading-main">
+          <p class="label">行情上下文</p>
+          <h2 id="market-chart-title">—</h2>
+        </div>
+        <div class="market-chart-controls">
+          <div id="market-period-switcher" class="market-period-switcher" aria-label="行情周期">
+            <button type="button" class="market-period-button active" data-market-period="1m" aria-pressed="true">分时</button>
+            <button type="button" class="market-period-button" data-market-period="1Day" aria-pressed="false">日K</button>
+            <button type="button" class="market-period-button" data-market-period="1Week" aria-pressed="false">周K</button>
+            <button type="button" class="market-period-button" data-market-period="1Month" aria-pressed="false">月K</button>
+          </div>
+          <div class="market-chart-price">
+            <strong id="market-chart-last-price">—</strong>
+            <span id="market-chart-source">等待行情来源</span>
+          </div>
+        </div>
+      </div>
+      <div class="market-chart-toolbar">
+        <div id="market-chart-legend" class="market-chart-legend">
+          <span><strong>成交量</strong></span>
+          <span><strong>MA20</strong></span>
+          <span><strong>MA60</strong></span>
+          <span>算法支撑 <strong id="market-support-value" class="market-level-value">—</strong></span>
+          <span>算法压力 <strong id="market-resistance-value" class="market-level-value">—</strong></span>
+        </div>
+        <span id="market-chart-stream-state" class="market-stream-state muted">等待实时流</span>
+      </div>
+      <div class="market-chart-stage">
+        <div id="advanced-market-chart" aria-label="多周期股票K线图"></div>
+        <div id="market-chart-loading" class="market-chart-loading" hidden>正在读取可验证行情…</div>
+        <div id="market-chart-empty" class="market-chart-empty" hidden>无可验证历史数据</div>
+      </div>
+      <div class="legacy-chart-compat" aria-hidden="true">
+        <span id="symbol-title">—</span>
+        <span id="last-price">—</span>
+        <span id="feed-source">—</span>
+        <div id="chart" aria-label="兼容实时K线图"></div>
+      </div>
+    </section>
+
+    <section class="panel chain-panel">
+      <div class="panel-heading">
+        <div>
+          <p class="label">决策黑匣子</p>
+          <h2>最近决策链</h2>
+        </div>
+        <span class="microcopy">来自 append-only audit</span>
+      </div>
+      <div id="decision-chain" class="decision-chain">
+        <p class="empty-state">等待策略或风控事件</p>
+      </div>
+    </section>
+
+    <section id="context-intelligence-panel" class="panel context-intelligence-panel">
+      <div class="panel-heading context-intelligence-heading">
+        <div>
+          <p class="label">实时上下文情报</p>
+          <h2><span id="context-intelligence-symbol">—</span> 综合情报</h2>
+        </div>
+        <span id="context-execution-authority" class="context-authority">仅作上下文证据，不代表交易许可</span>
+      </div>
+      <div class="context-synthesis-wrap">
+        <div>
+          <span>综合判断</span>
+          <p id="context-synthesis">NO VERIFIED DATA</p>
+        </div>
+        <div id="context-source-health">情报源状态：等待后端</div>
+      </div>
+      <div class="context-column-heading">
+        <strong>新鲜度 / 延迟</strong>
+        <span>Freshness is part of truth</span>
+      </div>
+      <div id="context-freshness-strip" class="context-freshness-strip"></div>
+      <div class="context-columns">
+        <section class="context-column">
+          <div class="context-column-heading"><strong>实时新闻</strong><span>保留原标题与原始来源</span></div>
+          <div id="context-news" class="context-list"><p class="context-empty">NO VERIFIED DATA</p></div>
+        </section>
+        <section class="context-column">
+          <div class="context-column-heading"><strong>SEC / 公司披露</strong><span>官方 filing 优先</span></div>
+          <div id="context-filings" class="context-list"><p class="context-empty">NO VERIFIED DATA</p></div>
+        </section>
+        <section class="context-column">
+          <div class="context-column-heading"><strong>政府 / 监管</strong><span>官方发布时间与生效时间分开</span></div>
+          <div id="context-government" class="context-list"><p class="context-empty">NO VERIFIED DATA</p></div>
+        </section>
+        <section class="context-column">
+          <div class="context-column-heading"><strong>资金行为</strong><span>VWAP / OFI / GEX / Wall，可验证派生证据</span></div>
+          <div id="context-flow" class="context-list"><p class="context-empty">NO VERIFIED DATA</p></div>
+        </section>
+      </div>
+      <div class="context-note">中文界面负责解释状态与证据类型；新闻、SEC 与政府文件保留原始标题/链接，避免未经验证的自动翻译改变事实含义。DELAYED / STALE 数据不会冒充实时。</div>
+    </section>
+
+    <section class="panel portfolio-panel">
+      <div class="panel-heading">
+        <div>
+          <p class="label">组合风险</p>
+          <h2>账户与持仓</h2>
+        </div>
+        <span id="portfolio-mode" class="microcopy">—</span>
+      </div>
+      <div id="portfolio-summary" class="metric-grid">
         <article><span>净值</span><strong id="equity">—</strong></article>
         <article><span>现金</span><strong id="cash">—</strong></article>
         <article><span>总敞口</span><strong id="gross-exposure">—</strong></article>
         <article><span>今日已实现</span><strong id="realized-pnl">—</strong></article>
       </div>
-      <div class="risk-card">
-        <div>
-          <span class="signal-dot"></span>
-          <strong>确定性风险闸门</strong>
-        </div>
-        <p>白名单、单笔名义金额、总敞口与当日亏损限制均为服务端强制执行。</p>
+      <div class="table-wrap compact-table">
+        <table>
+          <thead><tr><th>标的</th><th>数量</th><th>均价</th><th>现价</th><th>浮盈亏</th><th>收益率</th></tr></thead>
+          <tbody id="positions-body"><tr><td colspan="6" class="empty">暂无持仓</td></tr></tbody>
+        </table>
       </div>
-      <button class="kill-switch" type="button" disabled>GLOBAL KILL SWITCH · PAPER ONLY</button>
-    </aside>
+    </section>
 
-    <section class="panel order-panel">
+    <section class="panel executions-panel">
       <div class="panel-heading">
         <div>
-          <p class="label">受控执行</p>
-          <h2>提交模拟订单</h2>
+          <p class="label">实际执行</p>
+          <h2>最近订单 / 执行结果</h2>
         </div>
-        <span class="microcopy">服务端价格 · 幂等订单号</span>
+        <span class="microcopy">已知订单状态，不把 UNKNOWN 当成交</span>
       </div>
-      <form id="order-form" class="order-form">
-        <label>方向
-          <select id="side" name="side">
-            <option value="buy">BUY</option>
-            <option value="sell">SELL</option>
-          </select>
-        </label>
-        <label>数量
-          <input id="quantity" name="quantity" type="number" min="0.000001" step="0.000001" value="0.001" required>
-        </label>
-        <label>客户订单号
-          <input id="client-order-id" name="client_order_id" type="text" required>
-        </label>
-        <button class="primary-button" type="submit">通过风控提交</button>
-      </form>
-      <p id="order-message" class="message" role="status"></p>
-    </section>
-
-    <section class="panel table-panel positions-panel">
-      <div class="panel-heading"><div><p class="label">风险敞口</p><h2>当前持仓</h2></div></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>标的</th><th>数量</th><th>均价</th><th>现价</th><th>浮盈亏</th></tr></thead>
-          <tbody id="positions-body"><tr><td colspan="5" class="empty">暂无持仓</td></tr></tbody>
+          <thead><tr><th>时间</th><th>标的</th><th>方向</th><th>数量</th><th>参考/成交</th><th>状态</th></tr></thead>
+          <tbody id="executions-body"><tr><td colspan="6" class="empty">暂无执行记录</td></tr></tbody>
         </table>
       </div>
     </section>
 
-    <section class="panel table-panel orders-panel">
-      <div class="panel-heading"><div><p class="label">执行审计</p><h2>最近订单</h2></div></div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>时间</th><th>方向</th><th>标的</th><th>数量</th><th>成交价</th><th>状态</th></tr></thead>
-          <tbody id="orders-body"><tr><td colspan="6" class="empty">暂无订单</td></tr></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="panel external-panel">
+    <section class="panel health-panel">
       <div class="panel-heading">
-        <div><p class="label">只读接入</p><h2>外部券商与交易所账户</h2></div>
-        <span class="microcopy">观察模式 · 禁止实盘执行</span>
+        <div>
+          <p class="label">策略证据</p>
+          <h2>策略健康与晋级</h2>
+        </div>
+        <span class="microcopy">没有证据，不获得资金权限</span>
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>提供方</th><th>模式</th><th>状态</th><th>净值</th><th>持仓</th><th>订单</th></tr></thead>
-          <tbody id="external-accounts-body"><tr><td colspan="6" class="empty">未配置只读账户</td></tr></tbody>
+          <thead><tr><th>策略</th><th>版本</th><th>晋级许可</th><th>健康</th><th>样本</th><th>净期望</th><th>最大回撤</th></tr></thead>
+          <tbody id="strategy-health-body"><tr><td colspan="7" class="empty">等待策略健康数据</td></tr></tbody>
         </table>
+      </div>
+      <div class="panel-heading compact-heading">
+        <div>
+          <p class="label">成交证据</p>
+          <h3>Execution Friction Attribution</h3>
+        </div>
+        <span class="microcopy">真实成交与 modeled 假设分开，不把模型当事实</span>
+      </div>
+      <div id="strategy-execution-friction" class="loop-grid">
+        <article class="loop-card"><strong>等待成交摩擦归因…</strong></article>
+      </div>
+      <div class="panel-heading compact-heading">
+        <div>
+          <p class="label">标的归因</p>
+          <h3>按股票拆分的策略健康</h3>
+        </div>
+        <span class="microcopy">总体正收益不能掩盖单一标的持续失效</span>
+      </div>
+      <div id="strategy-symbol-attribution" class="loop-grid">
+        <article class="loop-card"><strong>等待标的归因…</strong></article>
       </div>
     </section>
 
-    <section class="panel table-panel crisis-panel">
-      <div class="panel-heading"><div><p class="label">危机期验证</p><h2>股灾中仍有净收益的真实案例</h2></div></div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>主体</th><th>类型</th><th>工具</th><th>窗口</th><th>净收益</th><th>证据</th></tr></thead>
-          <tbody id="crisis-winners-body"><tr><td colspan="6" class="empty">尚无 A/B 级验证案例</td></tr></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="panel table-panel partnership-panel">
-      <div class="panel-heading"><div><p class="label">合作前景</p><h2>战略合作执行验证</h2></div></div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>主体</th><th>成熟度</th><th>信心</th><th>关键验证指标</th></tr></thead>
-          <tbody id="partnerships-body"><tr><td colspan="4" class="empty">等待监管或公司披露</td></tr></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="panel evidence-panel">
+    <section class="panel loops-panel">
       <div class="panel-heading">
-        <div><p class="label">全球情报</p><h2>可信证据库</h2></div>
-        <button id="research-button" class="ghost-button" type="button">拉取官方更新</button>
+        <div>
+          <p class="label">无人值守运行</p>
+          <h2>Runtime Loops</h2>
+        </div>
+        <span class="microcopy">进程可以恢复，风险许可保持 fail-closed</span>
       </div>
-      <p class="evidence-note">A=账户/链上/审计；B=监管披露；C=公司与官方项目；D=未验证线索。D级信息不得驱动自动交易。</p>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>等级</th><th>日期</th><th>主体</th><th>标题</th><th>标签</th></tr></thead>
-          <tbody id="evidence-body"><tr><td colspan="5" class="empty">等待研究数据</td></tr></tbody>
-        </table>
+      <div id="runtime-loops" class="loop-grid">
+        <article class="loop-card"><strong>等待状态…</strong></article>
       </div>
     </section>
   </main>
 
   <footer>
-    <span>Global Market Agent Observatory</span>
-    <span>研究与监控工具，不构成投资建议。</span>
+    <span>Autonomous Trading Console</span>
+    <span>所有自动执行都必须经过策略晋级与确定性风险引擎。</span>
   </footer>
+
   <script src="/static/config.js"></script>
+  <script src="/static/symbol-switcher.js"></script>
   <script src="/static/runtime.js"></script>
   <script src="/static/market-client.js"></script>
   <script src="/static/backend-actions.js"></script>
+  <script src="/static/advanced-market-chart.js" defer></script>
+  <script src="/static/native-market-chart.js" defer></script>
   <script src="/static/app.js" defer></script>
+  <script src="/static/context-intelligence.js" defer></script>
+  <script src="/static/strategy-health-attribution.js" defer></script>
 </body>
 </html>
