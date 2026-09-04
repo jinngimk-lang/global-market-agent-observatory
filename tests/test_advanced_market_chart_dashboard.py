@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX = ROOT / "app" / "web" / "index.html"
@@ -51,6 +55,8 @@ def test_advanced_chart_uses_candles_volume_ma_and_provider_levels() -> None:
         "算法支撑",
         "算法压力",
         "loadMarketHistory",
+        "loadRuntimeMinuteFallback",
+        "runtime-feed",
         "1Day",
         "1Week",
         "1Month",
@@ -62,6 +68,21 @@ def test_advanced_chart_uses_candles_volume_ma_and_provider_levels() -> None:
     # A one-minute WebSocket event must not mutate a daily/weekly/monthly chart.
     assert "activePeriod !== '1m'" in source
     assert "candle.symbol !== currentSymbol" in source
+
+
+def test_advanced_chart_javascript_parses() -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed in this environment")
+
+    result = subprocess.run(
+        [node, "--check", str(ADVANCED)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_static_build_carries_advanced_chart_assets_without_backend_credentials() -> None:
