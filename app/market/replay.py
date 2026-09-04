@@ -31,7 +31,15 @@ class ReplayFeed:
         start_time: datetime | None = None,
     ) -> None:
         self.symbol = symbol.strip().upper()
-        self.symbols = set(_REPLAY_DASHBOARD_SYMBOLS) | {self.symbol}
+        # Preserve the original single-symbol BTC replay contract used by
+        # coverage/staleness tests. When a dashboard equity is the configured
+        # replay primary (the local review setup), expand to the complete
+        # dashboard universe and retain BTCUSDT as a reference feed.
+        self.symbols = (
+            {self.symbol}
+            if self.symbol == "BTCUSDT"
+            else set(_REPLAY_DASHBOARD_SYMBOLS) | {self.symbol}
+        )
         self.interval = interval
         self.seed = seed
         self.delay_seconds = delay_seconds
