@@ -45,11 +45,15 @@ def build_market_coverage(
     last_cycle_results: Mapping[str, object],
     last_cycle_errors: Mapping[str, str],
     now: datetime | None = None,
+    generated_at: datetime | None = None,
 ) -> MarketCoverageSnapshot:
-    generated_at = now or datetime.now(UTC)
-    if generated_at.tzinfo is None:
-        generated_at = generated_at.replace(tzinfo=UTC)
-    generated_at = generated_at.astimezone(UTC)
+    # `now` is the original API. The context-intelligence composition already
+    # passed the same concept as `generated_at`; accept that explicit alias so
+    # both read-only callers share one deterministic freshness timestamp.
+    snapshot_time = now or generated_at or datetime.now(UTC)
+    if snapshot_time.tzinfo is None:
+        snapshot_time = snapshot_time.replace(tzinfo=UTC)
+    snapshot_time = snapshot_time.astimezone(UTC)
 
     normalized_symbols = sorted({symbol.strip().upper() for symbol in symbols if symbol.strip()})
     coverage: dict[str, MarketSymbolCoverage] = {}
@@ -80,7 +84,7 @@ def build_market_coverage(
         if close_time.tzinfo is None:
             close_time = close_time.replace(tzinfo=UTC)
         close_time = close_time.astimezone(UTC)
-        age_seconds = max((generated_at - close_time).total_seconds(), 0.0)
+        age_seconds = max((snapshot_time - close_time).total_seconds(), 0.0)
         status = "fresh" if age_seconds <= max_age_seconds else "stale"
         if status == "fresh":
             fresh_symbols.append(symbol)
@@ -101,7 +105,7 @@ def build_market_coverage(
     denominator = len(normalized_symbols)
     ratio = len(fresh_symbols) / denominator if denominator else 0.0
     return MarketCoverageSnapshot(
-        generated_at=generated_at,
+        generated_at=snapshot_time,
         market_source=market_source,
         interval=interval,
         fresh_symbols=fresh_symbols,
