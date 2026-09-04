@@ -96,28 +96,42 @@
     const universe = [...new Set((status?.trading_universe || []).map(normalizeSymbol).filter(Boolean))].sort();
     const feedSymbol = normalizeSymbol(status?.market_symbol || selected);
     const marketSource = String(status?.market_source || (config.mode === 'static' ? 'public' : 'unknown')).toLowerCase();
+    const universeRole = marketSource === 'replay' ? 'Replay 模拟' : '美股自动交易';
 
     for (const symbol of universe) {
-      appendSymbolButton(root, symbol, '美股自动交易', 'universe-symbol', selected);
+      appendSymbolButton(root, symbol, universeRole, 'universe-symbol', selected);
     }
 
-    const shouldShowFeedSymbol = config.mode === 'static'
-      || (marketSource !== 'alpaca' && feedSymbol && !universe.includes(feedSymbol));
-    if (shouldShowFeedSymbol) {
+    // Replay is a local simulation surface, not a live provider. Keep BTCUSDT
+    // as an explicit reference feed even when MARKET_SYMBOL was changed to an
+    // equity for local review. The replay backend emits each of these symbols
+    // independently, so switching the chart does not hide or relabel data.
+    const feedSymbols = [...new Set([
+      feedSymbol,
+      ...(marketSource === 'replay' ? ['BTCUSDT'] : []),
+    ].map(normalizeSymbol).filter(Boolean))];
+    const extraFeedSymbols = feedSymbols.filter((symbol) => !universe.includes(symbol));
+    const shouldShowFeedSymbols = config.mode === 'static'
+      ? feedSymbols.length > 0
+      : marketSource !== 'alpaca' && extraFeedSymbols.length > 0;
+
+    if (shouldShowFeedSymbols) {
       const divider = document.createElement('span');
       divider.className = 'symbol-divider';
       divider.textContent = universe.length ? '行情源' : '当前行情';
       root.appendChild(divider);
-      appendSymbolButton(
-        root,
-        feedSymbol,
-        marketSource === 'replay' ? 'Replay Feed' : 'Market Feed',
-        'feed-symbol',
-        selected,
-      );
+      for (const symbol of (config.mode === 'static' ? feedSymbols : extraFeedSymbols)) {
+        appendSymbolButton(
+          root,
+          symbol,
+          marketSource === 'replay' ? 'Replay Feed' : 'Market Feed',
+          'feed-symbol',
+          selected,
+        );
+      }
     }
 
-    if (!universe.length && !feedSymbol) {
+    if (!universe.length && !feedSymbols.length) {
       const empty = document.createElement('span');
       empty.className = 'symbol-empty';
       empty.textContent = '没有可切换标的';
@@ -127,9 +141,13 @@
     const context = document.getElementById('market-context-label');
     if (context) {
       const universeText = universe.length ? `美股交易池 ${universe.join(' / ')}` : '未配置自动交易池';
-      const feedText = marketSource === 'alpaca'
-        ? 'Alpaca 多标的实时流'
-        : `${marketSource.toUpperCase()} ${status?.market_symbol || feedSymbol || '—'}`;
+      let feedText = `${marketSource.toUpperCase()} ${status?.market_symbol || feedSymbol || '—'}`;
+      if (marketSource === 'alpaca') {
+        feedText = 'Alpaca 多标的实时流';
+      } else if (marketSource === 'replay') {
+        const replaySymbols = [...new Set([...universe, ...feedSymbols])].sort();
+        feedText = `REPLAY 模拟 ${replaySymbols.join(' / ')}`;
+      }
       context.textContent = `${universeText} · ${feedText}`;
     }
   }
